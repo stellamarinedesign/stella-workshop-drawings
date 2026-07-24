@@ -82,6 +82,28 @@ anyway. All protection comes from Auth + the rules above: without a signed-in
 account nothing can be read or written, and only the design account can write.
 Don't try to obscure the config; it buys nothing.
 
+### About GitHub's "secret detected" alert
+GitHub secret scanning flags every `AIzaSy…` string because it can't tell a
+Firebase *web* key (public by design — see
+https://firebase.google.com/docs/projects/api-keys) from a sensitive Google
+Cloud key. Do **not** revoke or rotate it — a replacement key would go straight
+back into the HTML and be flagged again. The correct remediation is to
+**restrict** the key so it only works for this app:
+
+1. Google Cloud console → APIs & Services → Credentials → *Browser key (auto
+   created by Firebase)*.
+2. **Application restrictions** → Websites → add
+   `https://stellamarinedesign.github.io/*`.
+3. **API restrictions** → Restrict key → tick **Identity Toolkit API**,
+   **Token Service API**, **Cloud Firestore API** (add **Firebase
+   Installations API** too if the browser console ever complains). Save.
+4. Back on GitHub, close the alert as **False positive**.
+
+With that, the public key authenticates this site's traffic and nothing else;
+data security continues to come from Auth + rules. Note the referrer
+restriction means the pages only work when served from the Pages URL (local
+`file://` testing of sign-in will be blocked — deploy to test).
+
 ## Firestore schema
 ```
 folders/{autoId}
