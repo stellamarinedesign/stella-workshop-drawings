@@ -1,0 +1,1086 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#0E0A0A">
+<link rel="icon" type="image/png" href="assets/logo.png">
+<link rel="apple-touch-icon" href="assets/logo.png">
+<title>Drawing Setup — Engineering</title>
+<style>
+  /* Brand palette per "Corporate Brand Guidelines 2025" — see index.html */
+  :root {
+    --black-night: #0E0A0A;
+    --shadow-grey: #282827;
+    --line:        #454542;
+    --text-dim:    #b0b0ab;
+    --white:       #FFFFFF;
+    --red-bright:  #EA372E;
+    --red-deep:    #AF1F24;
+  }
+  /* Brand webfonts (licensed) — drop files into fonts/ and uncomment:
+  @font-face { font-family:"Friz Quadrata Pro";
+    src:url("fonts/FrizQuadrataPro.woff2") format("woff2"); font-display:swap; }
+  @font-face { font-family:"Sweet Sans Pro"; font-weight:400;
+    src:url("fonts/SweetSansPro-Light.woff2") format("woff2"); font-display:swap; }
+  */
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: "Sweet Sans Pro", "Sweet Sans", -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--black-night); color: var(--white);
+    font-size: 16px; min-height:100vh;
+  }
+  .brand-head { font-family: "Friz Quadrata Pro", "Friz Quadrata", "Friz Quadrata Std", Georgia, serif; }
+  header {
+    border-bottom: 3px solid var(--red-bright);
+    background: var(--shadow-grey);
+    padding: 14px 24px;
+    display:flex; align-items:baseline; gap:14px; flex-wrap:wrap;
+  }
+  header .logo { height:30px; align-self:center; }
+  header h1 { font-size:19px; font-weight:700; letter-spacing:.09em; text-transform:uppercase; }
+  header .sub { font-size:13px; color:var(--text-dim); }
+  header .spacer { margin-left:auto; }
+  header a { color:var(--red-bright); font-size:14px; font-weight:600; text-decoration:none; }
+  header .who { font-size:13px; color:var(--text-dim); }
+  header button {
+    background:none; border:1.5px solid var(--line); border-radius:8px;
+    color:var(--text-dim); font-family:inherit; font-size:13px;
+    padding:7px 13px; cursor:pointer;
+  }
+
+  main { max-width: 760px; margin: 0 auto; padding: 28px 24px 60px; }
+
+  /* ---- auth ---- */
+  #authView { display:none; max-width:380px; margin:0 auto; padding-top:50px; }
+  #authView.show { display:block; }
+  #authView p { color:var(--text-dim); margin-bottom:22px; line-height:1.5; }
+  .a-field { margin-bottom:16px; }
+  #authView button.primary { width:100%; margin-top:6px; }
+  #loginErr { color:var(--red-bright); margin-top:14px; font-size:14px; min-height:20px; line-height:1.5; }
+  #deniedView { display:none; text-align:center; padding-top:70px; line-height:1.7; }
+  #deniedView.show { display:block; }
+  #deniedView p { color:var(--text-dim); margin:10px 0 24px; }
+
+  #editor { display:none; }
+  #editor.show { display:block; }
+
+  /* ---- generic fields ---- */
+  .field { margin-bottom: 22px; }
+  label {
+    display:block; font-size:12px; font-weight:700;
+    letter-spacing:.14em; text-transform:uppercase;
+    color:var(--text-dim); margin-bottom:8px;
+  }
+  input[type=text], input[type=email], input[type=password], select {
+    width:100%;
+    background:var(--shadow-grey); border:2px solid var(--line); border-radius:10px;
+    color:var(--white); font-size:17px; font-family:inherit;
+    padding:13px 16px; outline:none;
+    transition: border-color .15s;
+  }
+  input:focus, select:focus { border-color:var(--red-bright); }
+  .hint { font-size:13px; color:var(--text-dim); margin-top:7px; line-height:1.5; }
+  .two-col { display:grid; grid-template-columns: 1fr 140px; gap:16px; }
+
+  .link-check { display:flex; gap:10px; }
+  .link-check input { flex:1; }
+  .link-status { font-size:13px; margin-top:7px; min-height:18px; }
+  .link-status.ok  { color:var(--text-dim); }
+  .link-status.bad { color:var(--red-bright); }
+
+  button.primary {
+    background:var(--red-deep); border:none; border-radius:10px;
+    color:var(--white); font-size:17px; font-weight:700; font-family:inherit;
+    padding:15px 34px; cursor:pointer; letter-spacing:.03em;
+  }
+  button.primary:hover { background:#c3272d; }
+  button.primary:disabled { background:var(--line); color:var(--text-dim); cursor:default; }
+  button.ghost {
+    background:none; border:2px solid var(--line); border-radius:10px;
+    color:var(--white); font-size:15px; font-weight:600; font-family:inherit;
+    padding:12px 22px; cursor:pointer;
+  }
+  button.mini {
+    background:none; border:1.5px solid var(--line); border-radius:8px;
+    color:var(--white); font-family:inherit; font-size:13px; font-weight:600;
+    padding:7px 12px; cursor:pointer; white-space:nowrap;
+  }
+  button.mini:hover { border-color:var(--red-bright); }
+  button.mini.danger { color:var(--red-bright); }
+
+  .panel {
+    border:2px solid var(--line); border-radius:12px;
+    background:var(--shadow-grey); padding:18px 20px; margin-bottom:24px;
+    line-height:1.6; font-size:15px;
+  }
+  .panel.warn { border-color: var(--red-deep); background:#2b100e; }
+  .panel strong { color:var(--red-bright); }
+  .panel .actions { margin-top:14px; display:flex; gap:12px; flex-wrap:wrap; }
+
+  #saveMsg { margin-top:18px; font-size:15px; min-height:22px; }
+  #saveMsg.ok  { color:var(--white); }
+  #saveMsg.bad { color:var(--red-bright); }
+
+  h2.sect {
+    font-size:13px; letter-spacing:.14em; text-transform:uppercase;
+    color:var(--text-dim); margin-bottom:14px;
+    border-top:1px solid var(--line); padding-top:26px; margin-top:44px;
+  }
+
+  /* ---- flags panel ---- */
+  #flagsPanel { display:none; margin-bottom:28px; }
+  #flagsPanel.show { display:block; }
+  #flagsBanner {
+    background:#2b100e; border:2px solid var(--red-deep); border-radius:12px;
+    padding:14px 18px; font-size:15px; font-weight:700; letter-spacing:.02em;
+    display:flex; align-items:center; gap:12px;
+  }
+  #flagsBanner .n {
+    background:var(--red-bright); color:var(--white); border-radius:999px;
+    min-width:28px; height:28px; display:inline-flex; align-items:center; justify-content:center;
+    font-size:15px;
+  }
+  .flag-row {
+    display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+    padding:12px 6px; border-bottom:1px solid var(--line); font-size:14.5px;
+  }
+  .flag-row .fmain { flex:1; min-width:220px; }
+  .flag-row .fname { font-weight:700; }
+  .flag-row .freason { color:var(--red-bright); }
+  .flag-row .fwhen { color:var(--text-dim); font-size:13px; }
+
+  /* ---- folder tree ---- */
+  #folderTree { margin-bottom:10px; }
+  .tnode {
+    display:flex; align-items:center; gap:8px;
+    padding:8px 8px; border-radius:8px; border:1.5px solid transparent;
+    font-size:15px;
+  }
+  .tnode:hover { background:var(--shadow-grey); }
+  .tnode.dragover { border-color:var(--red-bright); background:rgba(234,55,46,.08); }
+  .tnode .tname { font-weight:600; cursor:grab; }
+  .tnode .tcount { color:var(--text-dim); font-size:13px; }
+  .tnode .tmeta { color:var(--text-dim); font-size:12.5px; border:1px solid var(--line); border-radius:6px; padding:1px 7px; }
+  .tnode .tbtns { margin-left:auto; display:flex; gap:6px; flex-wrap:wrap; }
+  #treeRootDrop {
+    border:1.5px dashed var(--line); border-radius:8px;
+    color:var(--text-dim); font-size:13px; text-align:center;
+    padding:10px; margin-top:8px;
+  }
+  #treeRootDrop.dragover { border-color:var(--red-bright); color:var(--white); }
+
+  /* ---- folder edit panel ---- */
+  #folderEdit { display:none; }
+  #folderEdit.show { display:block; }
+  .kv-row { display:flex; gap:10px; margin-bottom:10px; }
+  .kv-row input.k { flex:0 0 200px; }
+  .kv-row input.v { flex:1; }
+  .kv-row button { flex-shrink:0; }
+
+  /* ---- modal picker ---- */
+  #modalOverlay {
+    display:none; position:fixed; inset:0; z-index:40;
+    background:rgba(0,0,0,.65);
+  }
+  #modalOverlay.show { display:flex; align-items:center; justify-content:center; padding:20px; }
+  #pickerBox {
+    background:var(--shadow-grey); border:2px solid var(--line); border-radius:14px;
+    width:100%; max-width:440px; max-height:80vh; overflow:auto; padding:20px;
+  }
+  #pickerBox h3 { font-size:16px; margin-bottom:14px; }
+  .pick-opt {
+    display:block; width:100%; text-align:left;
+    background:none; border:1.5px solid var(--line); border-radius:8px;
+    color:var(--white); font-family:inherit; font-size:15px;
+    padding:11px 14px; margin-bottom:8px; cursor:pointer;
+  }
+  .pick-opt:hover { border-color:var(--red-bright); }
+  .pick-opt:disabled { color:var(--text-dim); border-style:dashed; cursor:default; }
+
+  /* ---- existing drawings table ---- */
+  .ex-row {
+    display:flex; align-items:center; gap:12px;
+    padding:11px 4px; border-bottom:1px solid var(--line);
+    font-size:15px;
+  }
+  .ex-row[draggable=true] { cursor:grab; }
+  .ex-row .rev {
+    flex-shrink:0; width:34px; text-align:center;
+    color:var(--red-bright); font-weight:800;
+    font-family:"Friz Quadrata Pro","Friz Quadrata",Georgia,serif;
+  }
+  .ex-row .nm { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .ex-row .pth { color:var(--text-dim); font-size:13px; }
+
+  footer { max-width:760px; margin:0 auto; padding:0 24px 40px; color:var(--text-dim); font-size:12.5px; }
+</style>
+</head>
+<body>
+
+<header>
+  <img class="logo" src="assets/logo.svg" alt="Stella Marine">
+  <h1 class="brand-head">Drawing Setup</h1>
+  <span class="sub">Engineering only</span>
+  <span class="spacer"></span>
+  <span class="who" id="whoLabel"></span>
+  <button id="signOutBtn" style="display:none;">Sign out</button>
+  <a href="index.html">Floor viewer ›</a>
+</header>
+
+<main>
+
+  <!-- ============ AUTH ============ -->
+  <div id="authView">
+    <p>Sign in with the engineering account to manage drawings.</p>
+    <div class="a-field field">
+      <label for="loginEmail">Email</label>
+      <input id="loginEmail" type="email" autocomplete="username" autocapitalize="off" spellcheck="false">
+    </div>
+    <div class="a-field field">
+      <label for="loginPass">Password</label>
+      <input id="loginPass" type="password" autocomplete="current-password">
+    </div>
+    <button class="primary" id="loginBtn">Sign in</button>
+    <div id="loginErr"></div>
+  </div>
+
+  <!-- signed in, but not an engineering account -->
+  <div id="deniedView">
+    <strong>This account can't manage drawings.</strong>
+    <p id="deniedWho"></p>
+    <button class="ghost" id="deniedSignOut">Sign out</button>
+  </div>
+
+  <!-- ============ EDITOR ============ -->
+  <div id="editor">
+
+    <!-- ============ FLAGS ============ -->
+    <div id="flagsPanel">
+      <div id="flagsBanner"><span class="n" id="flagCount">0</span> flagged drawings — reported from the floor</div>
+      <div id="flagList"></div>
+    </div>
+
+    <div class="field">
+      <label for="fName">Drawing name</label>
+      <input type="text" id="fName" placeholder="e.g. Lifter Arm Weldment" autocomplete="off">
+    </div>
+
+    <div class="two-col">
+      <div class="field">
+        <label for="fNumber">Drawing number</label>
+        <input type="text" id="fNumber" placeholder="e.g. SL-Galaxy-0022" autocomplete="off">
+        <div class="hint">Used as the record ID — must be unique. Floor search ranks number matches first.</div>
+      </div>
+      <div class="field">
+        <label for="fRev">Revision</label>
+        <input type="text" id="fRev" placeholder="A" maxlength="4" autocomplete="off" style="text-transform:uppercase; text-align:center; font-weight:700;">
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="fFolder">Folder</label>
+      <select id="fFolder"></select>
+      <div id="newFolderRow" style="display:none; margin-top:10px;">
+        <input type="text" id="fFolderNewName" placeholder="New folder name — e.g. Universal" autocomplete="off">
+        <select id="fFolderNewParent" style="margin-top:10px;"></select>
+      </div>
+      <div class="hint">Pick an existing folder to avoid duplicates. Manage the tree in the Folders section below.</div>
+    </div>
+
+    <div class="field">
+      <label for="fLink">OneDrive share link</label>
+      <div class="link-check">
+        <input type="text" id="fLink" placeholder="Paste the 'Anyone with the link' URL" autocomplete="off">
+      </div>
+      <div class="link-status" id="linkStatus"></div>
+      <div class="hint">Right-click the PDF in Explorer → Share → "Anyone with the link" → Can view → Copy. Updating the file in OneDrive under the same name keeps this link current — no need to come back here.</div>
+    </div>
+
+    <!-- revision conflict panel, shown when saving over an existing record -->
+    <div class="panel warn" id="revWarn" style="display:none;">
+      <div id="revWarnText"></div>
+      <div class="actions">
+        <button class="primary" id="revConfirmBtn">Yes, replace it</button>
+        <button class="ghost" id="revCancelBtn">Cancel</button>
+      </div>
+    </div>
+
+    <button class="primary" id="saveBtn">Save drawing</button>
+    <div id="saveMsg"></div>
+
+    <!-- ============ FOLDERS ============ -->
+    <h2 class="sect">Folders</h2>
+    <div class="hint" style="margin-bottom:14px;">
+      Drag a folder onto another folder to move it, or drag a drawing from the list below into a folder.
+      Everything here is app-side only — OneDrive files and share links are never touched.
+    </div>
+    <div id="folderTree"></div>
+    <div id="treeRootDrop">Drop here to move to top level</div>
+    <div style="margin-top:14px;">
+      <button class="mini" id="addRootFolder">＋ New top-level folder</button>
+    </div>
+
+    <!-- folder detail / meta editor -->
+    <div class="panel" id="folderEdit">
+      <div class="field">
+        <label for="feName">Folder name</label>
+        <input type="text" id="feName" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="feParent">Parent folder</label>
+        <select id="feParent"></select>
+      </div>
+      <div class="field">
+        <label>Project info (shown to the floor when browsing this folder)</label>
+        <div id="feMetaRows"></div>
+        <button class="mini" id="feAddRow">＋ Add row</button>
+        <div class="hint">Common keys: Raw material, Material code. Free-form — add whatever the floor needs to see.</div>
+      </div>
+      <div class="actions">
+        <button class="primary" id="feSave">Save folder</button>
+        <button class="ghost" id="feCancel">Close</button>
+      </div>
+      <div id="feMsg" style="margin-top:12px; min-height:20px; font-size:14px;"></div>
+    </div>
+    <datalist id="metaKeys">
+      <option value="Raw material"></option>
+      <option value="Material code"></option>
+      <option value="Notes"></option>
+    </datalist>
+
+    <!-- ============ EXISTING ============ -->
+    <h2 class="sect">Existing drawings <span id="exCount"></span></h2>
+    <input type="text" id="exFilter" placeholder="Filter…" autocomplete="off" style="margin-bottom:12px;">
+    <div id="exList"></div>
+
+  </div>
+</main>
+
+<footer><span id="verLabel"></span></footer>
+
+<!-- move-to picker modal -->
+<div id="modalOverlay">
+  <div id="pickerBox">
+    <h3 id="pickerTitle"></h3>
+    <div id="pickerOpts"></div>
+    <button class="ghost" id="pickerCancel" style="width:100%; margin-top:6px;">Cancel</button>
+  </div>
+</div>
+
+<script type="module">
+/* =====================================================================
+   CONFIG — same Firebase project as index.html
+   ===================================================================== */
+const firebaseConfig = {
+  apiKey: "AIzaSyDKtfyXxWzu8rOMiJP2qcvRObxnJEUQz5A",
+  authDomain: "stella-workshop-drawings.firebaseapp.com",
+  projectId: "stella-workshop-drawings",
+  storageBucket: "stella-workshop-drawings.firebasestorage.app",
+  messagingSenderId: "674286300074",
+  appId: "1:674286300074:web:17c1fe44f2bb07178a99d3",
+  measurementId: "G-83DPT2CHNX"
+};
+
+/* Accounts allowed to use this page. MUST match the email list in the
+   Firestore security rules (see README) — this constant is UI courtesy,
+   the rules are the real enforcement. */
+const ENGINEERING_EMAILS = ["design@stellamarine.com.au"];
+
+const APP_VERSION = "2.0";
+
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut }
+  from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getFirestore, collection, getDocs, doc, getDoc, setDoc, addDoc, updateDoc,
+         deleteDoc, query, where, writeBatch, serverTimestamp }
+  from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+const app  = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db   = getFirestore(app);
+
+const $ = id => document.getElementById(id);
+let existingDocs = [];          // all drawing records (including hidden)
+let foldersById  = new Map();
+let childrenOf   = new Map();   // parentId ("root") -> sorted [folder]
+let openFlags    = [];
+let pendingSave  = null;        // payload held while rev warning is showing
+let editFolderId = null;        // folder open in the detail panel
+
+/* ================= auth ================= */
+function isEngineering(user) {
+  return !!user && ENGINEERING_EMAILS.includes((user.email || "").toLowerCase());
+}
+onAuthStateChanged(auth, user => {
+  $("authView").classList.remove("show");
+  $("deniedView").classList.remove("show");
+  $("editor").classList.remove("show");
+  $("signOutBtn").style.display = user ? "" : "none";
+  $("whoLabel").textContent = user ? (user.email || "") : "";
+  if (!user) {
+    $("authView").classList.add("show");
+    $("loginEmail").focus();
+  } else if (!isEngineering(user)) {
+    $("deniedWho").textContent = "Signed in as " + (user.email || "unknown") +
+      ". Use the engineering account to manage drawings — this one only works on the floor viewer.";
+    $("deniedView").classList.add("show");
+  } else {
+    $("editor").classList.add("show");
+    openEditor();
+  }
+});
+async function doLogin() {
+  const err = $("loginErr");
+  err.textContent = "";
+  $("loginBtn").disabled = true;
+  try {
+    await signInWithEmailAndPassword(auth, $("loginEmail").value.trim(), $("loginPass").value);
+    $("loginPass").value = "";
+  } catch (e) {
+    err.textContent = (e.code === "auth/network-request-failed")
+      ? "No connection. Check the network and try again."
+      : "Wrong email or password.";
+  }
+  $("loginBtn").disabled = false;
+}
+$("loginBtn").addEventListener("click", doLogin);
+$("loginPass").addEventListener("keydown", e => { if (e.key === "Enter") doLogin(); });
+$("signOutBtn").addEventListener("click", () => signOut(auth));
+$("deniedSignOut").addEventListener("click", () => signOut(auth));
+
+async function openEditor() {
+  await refreshAll();
+}
+
+/* ================= data ================= */
+async function refreshAll() {
+  const [dSnap, fSnap, flSnap] = await Promise.all([
+    getDocs(collection(db, "drawings")),
+    getDocs(collection(db, "folders")),
+    getDocs(query(collection(db, "flags"), where("resolved", "==", false))),
+  ]);
+  existingDocs = dSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+  existingDocs.sort((a,b) => (a.drawingName||"").localeCompare(b.drawingName||""));
+  $("exCount").textContent = "(" + existingDocs.length + ")";
+
+  foldersById = new Map(fSnap.docs.map(f => [f.id, { id: f.id, ...f.data() }]));
+  rebuildChildren();
+
+  openFlags = flSnap.docs.map(f => ({ id: f.id, ...f.data() }));
+  openFlags.sort((a,b) => tsMillis(a.flaggedAt) - tsMillis(b.flaggedAt));
+
+  renderFlags();
+  buildFolderSelects();
+  renderTree();
+  renderExisting();
+}
+function rebuildChildren() {
+  childrenOf = new Map();
+  for (const f of foldersById.values()) {
+    const key = f.parentId || "root";
+    if (!childrenOf.has(key)) childrenOf.set(key, []);
+    childrenOf.get(key).push(f);
+  }
+  for (const list of childrenOf.values())
+    list.sort((a,b) => (a.order ?? 0) - (b.order ?? 0) || (a.name||"").localeCompare(b.name||""));
+}
+function tsMillis(ts) { return ts && ts.toMillis ? ts.toMillis() : 0; }
+
+function slugify(s) {
+  return (s||"").trim().replace(/[\/\\\s'"#?%]+/g, "-").replace(/-+/g,"-").replace(/^-|-$/g,"");
+}
+function pathOf(folderId) {
+  const parts = [];
+  let f = foldersById.get(folderId), hops = 0;
+  while (f && hops++ < 20) { parts.unshift(f.name || "?"); f = f.parentId ? foldersById.get(f.parentId) : null; }
+  return parts.join("/");
+}
+function descendantSet(folderId) {
+  const s = new Set([folderId]);
+  const walk = id => { for (const c of (childrenOf.get(id) || [])) { s.add(c.id); walk(c.id); } };
+  walk(folderId);
+  return s;
+}
+function wouldCycle(folderId, newParentId) {
+  let p = newParentId, hops = 0;
+  while (p && hops++ < 50) {
+    if (p === folderId) return true;
+    p = (foldersById.get(p) || {}).parentId || null;
+  }
+  return false;
+}
+function nextOrder(parentId) {
+  const sibs = childrenOf.get(parentId || "root") || [];
+  return sibs.length ? Math.max(...sibs.map(s => s.order ?? 0)) + 1 : 0;
+}
+/* flattened tree for selects/pickers: [{id, name, depth}] */
+function flatTree() {
+  const out = [];
+  const walk = (pid, depth) => {
+    for (const f of (childrenOf.get(pid) || [])) {
+      out.push({ id: f.id, name: f.name || "?", depth });
+      walk(f.id, depth + 1);
+    }
+  };
+  walk("root", 0);
+  return out;
+}
+
+/* ================= flags panel ================= */
+function renderFlags() {
+  const panel = $("flagsPanel");
+  panel.classList.toggle("show", openFlags.length > 0);
+  $("flagCount").textContent = openFlags.length;
+  const el = $("flagList");
+  el.innerHTML = "";
+  for (const fl of openFlags) {
+    const row = document.createElement("div");
+    row.className = "flag-row";
+    const when = fl.flaggedAt && fl.flaggedAt.toDate
+      ? fl.flaggedAt.toDate().toLocaleString("en-AU", { day:"numeric", month:"short", hour:"numeric", minute:"2-digit" })
+      : "";
+    row.innerHTML = `
+      <div class="fmain">
+        <span class="fname">${escapeHtml(fl.drawingName || fl.drawingId)}</span>
+        <span class="pth"> ${escapeHtml(fl.drawingNumber || "")}</span><br>
+        <span class="freason">${escapeHtml(fl.reason || "No reason given")}</span>
+        <span class="fwhen"> · ${escapeHtml(when)}</span>
+      </div>
+      <button class="mini" data-act="load">Load drawing</button>
+      <button class="mini" data-act="resolve">Mark resolved</button>`;
+    row.querySelector('[data-act="load"]').onclick = () => {
+      const d = existingDocs.find(x => x.id === fl.drawingId);
+      if (d) loadIntoForm(d);
+      else alert("That drawing record no longer exists (it may have been hidden or re-numbered).");
+    };
+    row.querySelector('[data-act="resolve"]').onclick = async e => {
+      e.target.disabled = true;
+      try {
+        await updateDoc(doc(db, "flags", fl.id), { resolved: true, resolvedAt: serverTimestamp() });
+        openFlags = openFlags.filter(x => x.id !== fl.id);
+        renderFlags();
+      } catch (err) {
+        e.target.disabled = false;
+        alert("Couldn't update the flag — check the connection. (" + err.message + ")");
+      }
+    };
+    el.appendChild(row);
+  }
+}
+
+/* ================= folder selects (drawing form) ================= */
+function buildFolderSelects() {
+  const sel = $("fFolder");
+  const prev = sel.value;
+  sel.innerHTML = "";
+  for (const f of flatTree()) {
+    const o = document.createElement("option");
+    o.value = f.id;
+    o.textContent = "  ".repeat(f.depth) + (f.depth ? "└ " : "") + f.name;
+    sel.appendChild(o);
+  }
+  const oNew = document.createElement("option");
+  oNew.value = "__new__"; oNew.textContent = "＋ New folder…";
+  sel.appendChild(oNew);
+  if ([...sel.options].some(o => o.value === prev)) sel.value = prev;
+  else if (!flatTree().length) sel.value = "__new__";
+  toggleNewFolder();
+
+  const pSel = $("fFolderNewParent");
+  pSel.innerHTML = "";
+  const oTop = document.createElement("option");
+  oTop.value = ""; oTop.textContent = "(top level)";
+  pSel.appendChild(oTop);
+  for (const f of flatTree()) {
+    const o = document.createElement("option");
+    o.value = f.id;
+    o.textContent = "  ".repeat(f.depth) + (f.depth ? "└ " : "") + f.name;
+    pSel.appendChild(o);
+  }
+}
+$("fFolder").addEventListener("change", toggleNewFolder);
+function toggleNewFolder() {
+  $("newFolderRow").style.display = $("fFolder").value === "__new__" ? "block" : "none";
+}
+
+/* ================= folder tree UI ================= */
+function renderTree() {
+  const el = $("folderTree");
+  el.innerHTML = "";
+  const flat = flatTree();
+  if (!flat.length) {
+    el.innerHTML = `<div class="hint">No folders yet — add one below.</div>`;
+  }
+  for (const node of flat) {
+    const f = foldersById.get(node.id);
+    const nDrawings = existingDocs.filter(d => d.folderId === f.id).length;
+    const nKids = (childrenOf.get(f.id) || []).length;
+    const hasMeta = f.meta && Object.values(f.meta).some(v => v !== "" && v != null);
+    const row = document.createElement("div");
+    row.className = "tnode";
+    row.style.marginLeft = (node.depth * 26) + "px";
+    row.dataset.fid = f.id;
+    row.innerHTML = `
+      <span class="tname" draggable="true">📁 ${escapeHtml(f.name || "?")}</span>
+      <span class="tcount">${nDrawings ? nDrawings + " dwg" : ""}</span>
+      ${hasMeta ? '<span class="tmeta">info</span>' : ""}
+      <span class="tbtns">
+        <button class="mini" data-act="up" title="Move up">↑</button>
+        <button class="mini" data-act="down" title="Move down">↓</button>
+        <button class="mini" data-act="add">＋ Sub</button>
+        <button class="mini" data-act="edit">Edit</button>
+        <button class="mini" data-act="move">Move to…</button>
+        <button class="mini danger" data-act="del">Delete</button>
+      </span>`;
+
+    row.querySelector('[data-act="up"]').onclick   = () => reorderFolder(f, -1);
+    row.querySelector('[data-act="down"]').onclick = () => reorderFolder(f, +1);
+    row.querySelector('[data-act="add"]').onclick  = () => createFolderPrompt(f.id);
+    row.querySelector('[data-act="edit"]').onclick = () => openFolderEdit(f.id);
+    row.querySelector('[data-act="move"]').onclick = () =>
+      pickFolder(`Move "${f.name}" into…`, { excludeSet: descendantSet(f.id), allowRoot: true },
+        target => moveFolder(f, target));
+    row.querySelector('[data-act="del"]').onclick  = () => deleteFolderFlow(f, nKids, nDrawings);
+
+    // drag: folders re-parent, drawings re-file
+    const nameEl = row.querySelector(".tname");
+    nameEl.addEventListener("dragstart", e => {
+      e.dataTransfer.setData("text/x-folder", f.id);
+      e.dataTransfer.effectAllowed = "move";
+    });
+    row.addEventListener("dragover", e => { e.preventDefault(); row.classList.add("dragover"); });
+    row.addEventListener("dragleave", () => row.classList.remove("dragover"));
+    row.addEventListener("drop", async e => {
+      e.preventDefault();
+      row.classList.remove("dragover");
+      const movedFolder = e.dataTransfer.getData("text/x-folder");
+      const movedDrawing = e.dataTransfer.getData("text/x-drawing");
+      if (movedFolder && movedFolder !== f.id) {
+        const src = foldersById.get(movedFolder);
+        if (src) await moveFolder(src, f.id);
+      } else if (movedDrawing) {
+        await moveDrawing(movedDrawing, f.id);
+      }
+    });
+    el.appendChild(row);
+  }
+
+  const rootDrop = $("treeRootDrop");
+  rootDrop.style.display = flat.length ? "" : "none";
+  rootDrop.ondragover = e => { e.preventDefault(); rootDrop.classList.add("dragover"); };
+  rootDrop.ondragleave = () => rootDrop.classList.remove("dragover");
+  rootDrop.ondrop = async e => {
+    e.preventDefault();
+    rootDrop.classList.remove("dragover");
+    const movedFolder = e.dataTransfer.getData("text/x-folder");
+    if (movedFolder) {
+      const src = foldersById.get(movedFolder);
+      if (src) await moveFolder(src, null);
+    }
+  };
+}
+
+async function createFolderPrompt(parentId) {
+  const name = prompt(parentId ? `New folder inside "${foldersById.get(parentId).name}":` : "New top-level folder name:");
+  if (!name || !name.trim()) return;
+  await addDoc(collection(db, "folders"), {
+    name: name.trim(), parentId: parentId || null, order: nextOrder(parentId), meta: {},
+  });
+  await refreshAll();
+}
+$("addRootFolder").addEventListener("click", () => createFolderPrompt(null));
+
+async function reorderFolder(f, dir) {
+  const sibs = [...(childrenOf.get(f.parentId || "root") || [])];
+  const i = sibs.findIndex(s => s.id === f.id);
+  const j = i + dir;
+  if (j < 0 || j >= sibs.length) return;
+  [sibs[i], sibs[j]] = [sibs[j], sibs[i]];
+  // renumber the whole sibling group — avoids ties with defaulted order:0 docs
+  const batch = writeBatch(db);
+  sibs.forEach((s, idx) => batch.update(doc(db, "folders", s.id), { order: idx }));
+  await batch.commit();
+  await refreshAll();
+}
+
+async function moveFolder(f, newParentId) {
+  if (newParentId === f.id) return;
+  if (wouldCycle(f.id, newParentId)) {
+    alert("Can't move a folder inside itself.");
+    return;
+  }
+  await updateDoc(doc(db, "folders", f.id), {
+    parentId: newParentId || null,
+    order: nextOrder(newParentId),
+  });
+  foldersById.get(f.id).parentId = newParentId || null;   // keep local map truthful before path sync
+  await syncPathsUnder(f.id);
+  await refreshAll();
+}
+
+async function moveDrawing(drawingId, folderId) {
+  const d = existingDocs.find(x => x.id === drawingId);
+  if (!d) return;
+  await updateDoc(doc(db, "drawings", drawingId), {
+    folderId: folderId,
+    folderPath: pathOf(folderId),      // parallel string kept for one release (rollback)
+  });
+  await refreshAll();
+}
+
+/* After a folder rename/move, refresh the parallel folderPath strings on
+   affected drawings so the rollback data stays truthful. Cheap at this
+   data volume; remove together with folderPath after the parallel release. */
+async function syncPathsUnder(folderId) {
+  rebuildChildren();
+  const set = descendantSet(folderId);
+  const affected = existingDocs.filter(d => d.folderId && set.has(d.folderId));
+  if (!affected.length) return;
+  const batch = writeBatch(db);
+  for (const d of affected)
+    batch.update(doc(db, "drawings", d.id), { folderPath: pathOf(d.folderId) });
+  await batch.commit();
+}
+
+function deleteFolderFlow(f, nKids, nDrawings) {
+  if (nKids === 0 && nDrawings === 0) {
+    if (confirm(`Delete empty folder "${f.name}"?`)) {
+      deleteDoc(doc(db, "folders", f.id)).then(refreshAll);
+    }
+    return;
+  }
+  const parentName = f.parentId ? (foldersById.get(f.parentId)||{}).name : "top level";
+  if (!confirm(
+    `"${f.name}" contains ${nKids} folder(s) and ${nDrawings} drawing(s).\n\n` +
+    `Move its contents to ${f.parentId ? '"' + parentName + '"' : "the top level"} and delete it?\n` +
+    `(Nothing is deleted from OneDrive — links are never affected.)`)) return;
+  (async () => {
+    const movedKids = (childrenOf.get(f.id) || []).map(k => k.id);
+    const batch = writeBatch(db);
+    for (const kid of movedKids)
+      batch.update(doc(db, "folders", kid), { parentId: f.parentId || null, order: nextOrder(f.parentId) });
+    for (const d of existingDocs.filter(x => x.folderId === f.id))
+      batch.update(doc(db, "drawings", d.id), { folderId: f.parentId || null, folderPath: f.parentId ? pathOf(f.parentId) : "" });
+    batch.delete(doc(db, "folders", f.id));
+    await batch.commit();
+    await refreshAll();                                    // reload the fresh tree first…
+    for (const kid of movedKids) await syncPathsUnder(kid); // …then repair folderPath strings in moved subtrees
+  })();
+}
+
+/* ================= folder edit panel (name / parent / meta) ================= */
+function openFolderEdit(folderId) {
+  editFolderId = folderId;
+  const f = foldersById.get(folderId);
+  $("feName").value = f.name || "";
+  $("feMsg").textContent = "";
+
+  const pSel = $("feParent");
+  pSel.innerHTML = "";
+  const oTop = document.createElement("option");
+  oTop.value = ""; oTop.textContent = "(top level)";
+  pSel.appendChild(oTop);
+  const excl = descendantSet(folderId);
+  for (const n of flatTree()) {
+    if (excl.has(n.id)) continue;
+    const o = document.createElement("option");
+    o.value = n.id;
+    o.textContent = "  ".repeat(n.depth) + (n.depth ? "└ " : "") + n.name;
+    pSel.appendChild(o);
+  }
+  pSel.value = f.parentId || "";
+
+  $("feMetaRows").innerHTML = "";
+  const meta = f.meta || {};
+  const keys = Object.keys(meta);
+  if (!keys.length) addMetaRow("", "");
+  for (const k of keys) addMetaRow(k, meta[k]);
+
+  $("folderEdit").classList.add("show");
+  $("folderEdit").scrollIntoView({ behavior:"smooth", block:"center" });
+}
+function addMetaRow(k, v) {
+  const row = document.createElement("div");
+  row.className = "kv-row";
+  row.innerHTML = `
+    <input type="text" class="k" placeholder="Key — e.g. Raw material" list="metaKeys" autocomplete="off">
+    <input type="text" class="v" placeholder="Value — e.g. 6mm 5083 plate" autocomplete="off">
+    <button class="mini danger" title="Remove row">×</button>`;
+  row.querySelector(".k").value = k;
+  row.querySelector(".v").value = v;
+  row.querySelector("button").onclick = () => row.remove();
+  $("feMetaRows").appendChild(row);
+}
+$("feAddRow").addEventListener("click", () => addMetaRow("", ""));
+$("feCancel").addEventListener("click", () => {
+  $("folderEdit").classList.remove("show");
+  editFolderId = null;
+});
+$("feSave").addEventListener("click", async () => {
+  if (!editFolderId) return;
+  const f = foldersById.get(editFolderId);
+  const name = $("feName").value.trim();
+  const newParent = $("feParent").value || null;
+  const msg = $("feMsg");
+  if (!name) { msg.style.color = "var(--red-bright)"; msg.textContent = "The folder needs a name."; return; }
+  if (wouldCycle(editFolderId, newParent)) {
+    msg.style.color = "var(--red-bright)"; msg.textContent = "Can't move a folder inside itself.";
+    return;
+  }
+  const meta = {};
+  for (const row of $("feMetaRows").children) {
+    const k = row.querySelector(".k").value.trim();
+    const v = row.querySelector(".v").value.trim();
+    if (k && v) meta[k] = v;
+  }
+  $("feSave").disabled = true;
+  try {
+    await updateDoc(doc(db, "folders", editFolderId), {
+      name, parentId: newParent,
+      ...(newParent !== (f.parentId || null) ? { order: nextOrder(newParent) } : {}),
+      meta,
+    });
+    foldersById.get(editFolderId).name = name;
+    foldersById.get(editFolderId).parentId = newParent;
+    await syncPathsUnder(editFolderId);
+    msg.style.color = "var(--white)"; msg.textContent = "Saved.";
+    await refreshAll();
+    openFolderEdit(editFolderId);   // re-open with fresh data
+  } catch (err) {
+    msg.style.color = "var(--red-bright)";
+    msg.textContent = "Save failed — " + err.message;
+  }
+  $("feSave").disabled = false;
+});
+
+/* ================= picker modal ================= */
+let pickerCb = null;
+function pickFolder(title, opts, cb) {
+  pickerCb = cb;
+  $("pickerTitle").textContent = title;
+  const box = $("pickerOpts");
+  box.innerHTML = "";
+  if (opts.allowRoot) {
+    const b = document.createElement("button");
+    b.className = "pick-opt";
+    b.textContent = "(top level)";
+    b.onclick = () => { closePicker(); cb(null); };
+    box.appendChild(b);
+  }
+  for (const n of flatTree()) {
+    const b = document.createElement("button");
+    b.className = "pick-opt";
+    b.textContent = "  ".repeat(n.depth) + (n.depth ? "└ " : "") + n.name;
+    if (opts.excludeSet && opts.excludeSet.has(n.id)) b.disabled = true;
+    else b.onclick = () => { closePicker(); cb(n.id); };
+    box.appendChild(b);
+  }
+  $("modalOverlay").classList.add("show");
+}
+function closePicker() { $("modalOverlay").classList.remove("show"); pickerCb = null; }
+$("pickerCancel").addEventListener("click", closePicker);
+$("modalOverlay").addEventListener("click", e => { if (e.target === $("modalOverlay")) closePicker(); });
+
+/* ================= link sanity check ================= */
+$("fLink").addEventListener("input", () => {
+  const v = $("fLink").value.trim();
+  const st = $("linkStatus");
+  if (!v) { st.textContent = ""; st.className = "link-status"; return; }
+  let ok = false;
+  try {
+    const u = new URL(v);
+    ok = /(-my\.sharepoint\.com|sharepoint\.com|1drv\.ms)$/i.test(u.hostname)
+         || u.hostname.endsWith(".sharepoint.com");
+  } catch { ok = false; }
+  st.textContent = ok ? "Looks like a valid OneDrive/SharePoint link."
+                      : "This doesn't look like a OneDrive share link — double-check it.";
+  st.className = "link-status " + (ok ? "ok" : "bad");
+});
+
+/* ================= revision comparison ================= */
+function cmpRev(a, b) {
+  a = (a||"").toUpperCase().trim(); b = (b||"").toUpperCase().trim();
+  const na = parseInt(a,10), nb = parseInt(b,10);
+  if (!isNaN(na) && !isNaN(nb)) return na - nb;
+  if (a.length !== b.length) return a.length - b.length;  // AA > Z
+  return a.localeCompare(b);
+}
+
+/* ================= save flow ================= */
+$("saveBtn").addEventListener("click", async () => {
+  const name   = $("fName").value.trim();
+  const number = $("fNumber").value.trim();
+  const rev    = $("fRev").value.trim().toUpperCase();
+  const link   = $("fLink").value.trim();
+  const msg    = $("saveMsg");
+  msg.className = ""; msg.textContent = "";
+
+  let folderId = $("fFolder").value;
+  let newFolder = null;
+  if (folderId === "__new__") {
+    const nfName = $("fFolderNewName").value.trim();
+    if (!nfName) { msg.className = "bad"; msg.textContent = "Give the new folder a name."; return; }
+    newFolder = { name: nfName, parentId: $("fFolderNewParent").value || null };
+    folderId = null;
+  }
+
+  if (!name || !number || !rev || !link || (!folderId && !newFolder)) {
+    msg.className = "bad"; msg.textContent = "All fields are required.";
+    return;
+  }
+  try { new URL(link); } catch {
+    msg.className = "bad"; msg.textContent = "The share link isn't a valid URL.";
+    return;
+  }
+
+  const id = slugify(number);
+  const payload = { name, number, rev, link, folderId, newFolder, id };
+
+  const ref = doc(db, "drawings", id);
+  const snap = await getDoc(ref);
+
+  if (snap.exists()) {
+    const cur = snap.data();
+    const c = cmpRev(rev, cur.currentRevision);
+    if (c <= 0) {
+      pendingSave = payload;
+      $("revWarnText").innerHTML =
+        `<strong>${escapeHtml(number)}</strong> already exists at revision ` +
+        `<strong>${escapeHtml(cur.currentRevision||"?")}</strong>. ` +
+        (c === 0
+          ? `You're saving the <strong>same revision</strong> — fine if you're correcting the link or details, but this won't record a new revision history entry as an upgrade.`
+          : `You're trying to save an <strong>older revision (${escapeHtml(rev)})</strong>. The floor will see this as current. Only do this if the newer revision was issued in error.`);
+      $("revWarn").style.display = "block";
+      $("revWarn").scrollIntoView({ behavior:"smooth", block:"center" });
+      return;
+    }
+  }
+  await commitSave(payload, snap.exists() ? snap.data() : null);
+});
+
+$("revConfirmBtn").addEventListener("click", async () => {
+  $("revWarn").style.display = "none";
+  if (pendingSave) {
+    const ref = doc(db, "drawings", pendingSave.id);
+    const snap = await getDoc(ref);
+    await commitSave(pendingSave, snap.exists() ? snap.data() : null, /*forced*/true);
+    pendingSave = null;
+  }
+});
+$("revCancelBtn").addEventListener("click", () => {
+  $("revWarn").style.display = "none";
+  pendingSave = null;
+});
+
+async function commitSave(p, previous, forced = false) {
+  const msg = $("saveMsg");
+  const who = (auth.currentUser && auth.currentUser.email) || "engineering";
+  try {
+    let folderId = p.folderId;
+    if (p.newFolder) {
+      const nf = await addDoc(collection(db, "folders"), {
+        name: p.newFolder.name, parentId: p.newFolder.parentId,
+        order: nextOrder(p.newFolder.parentId), meta: {},
+      });
+      folderId = nf.id;
+      foldersById.set(nf.id, { id: nf.id, name: p.newFolder.name, parentId: p.newFolder.parentId, meta: {} });
+      rebuildChildren();
+    }
+
+    const ref = doc(db, "drawings", p.id);
+    await setDoc(ref, {
+      drawingName:      p.name,
+      drawingNumber:    p.number,
+      folderId:         folderId,
+      folderPath:       pathOf(folderId),   // parallel string kept for one release (rollback)
+      currentRevision:  p.rev,
+      currentLink:      p.link,
+      currentUpdatedAt: serverTimestamp(),
+      currentUpdatedBy: who,
+    }, { merge: true });
+
+    // audit trail — one entry per save, append-only
+    await addDoc(collection(db, "drawings", p.id, "revisions"), {
+      revision:   p.rev,
+      link:       p.link,
+      savedAt:    serverTimestamp(),
+      savedBy:    who,
+      forced:     forced,
+      replaced:   previous ? (previous.currentRevision || null) : null,
+    });
+
+    msg.className = "ok";
+    msg.textContent = `Saved ${p.number} rev ${p.rev}. The floor viewer shows it immediately.`;
+    ["fName","fNumber","fRev","fLink","fFolderNewName"].forEach(i => $(i).value = "");
+    $("linkStatus").textContent = "";
+    await refreshAll();
+  } catch (err) {
+    msg.className = "bad";
+    msg.textContent = "Save failed — check the connection and try again. (" + err.message + ")";
+    console.error(err);
+  }
+}
+
+/* ================= existing list ================= */
+function renderExisting() {
+  const term = ($("exFilter").value||"").toLowerCase();
+  const list = existingDocs.filter(d =>
+    !term ||
+    (d.drawingName||"").toLowerCase().includes(term) ||
+    (d.drawingNumber||"").toLowerCase().includes(term));
+  const el = $("exList");
+  el.innerHTML = "";
+  for (const d of list) {
+    const pathText = d.folderId && foldersById.has(d.folderId)
+      ? pathOf(d.folderId).split("/").join(" / ")
+      : "Unfiled";
+    const row = document.createElement("div");
+    row.className = "ex-row";
+    row.draggable = true;
+    row.innerHTML = `
+      <span class="rev">${escapeHtml(d.currentRevision||"–")}</span>
+      <span class="nm">${escapeHtml(d.drawingName||"(unnamed)")}
+        <span class="pth"> — ${escapeHtml(d.drawingNumber||"")} · ${escapeHtml(pathText)}${d.hidden ? " · hidden" : ""}</span>
+      </span>
+      <button class="mini" data-act="load">Load</button>
+      <button class="mini" data-act="move">Move to…</button>`;
+    row.addEventListener("dragstart", e => {
+      e.dataTransfer.setData("text/x-drawing", d.id);
+      e.dataTransfer.effectAllowed = "move";
+    });
+    row.querySelector('[data-act="load"]').onclick = () => loadIntoForm(d);
+    row.querySelector('[data-act="move"]').onclick = () =>
+      pickFolder(`Move "${d.drawingName || d.id}" to…`, {}, target => moveDrawing(d.id, target));
+    el.appendChild(row);
+  }
+}
+$("exFilter").addEventListener("input", renderExisting);
+
+function loadIntoForm(d) {
+  $("fName").value   = d.drawingName || "";
+  $("fNumber").value = d.drawingNumber || "";
+  $("fRev").value    = d.currentRevision || "";
+  $("fLink").value   = d.currentLink || "";
+  const sel = $("fFolder");
+  if (d.folderId && [...sel.options].some(o => o.value === d.folderId)) {
+    sel.value = d.folderId;
+  } else {
+    sel.value = "__new__";
+    $("fFolderNewName").value = (d.folderPath || "").split("/").pop() || "";
+  }
+  toggleNewFolder();
+  window.scrollTo({ top:0, behavior:"smooth" });
+}
+
+/* ================= version ================= */
+$("verLabel").textContent = "Drawings setup v" + APP_VERSION;
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({
+    "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+  }[c]));
+}
+</script>
+</body>
+</html>
