@@ -152,20 +152,33 @@
 
   /* ---------- engineering toolbar ---------- */
   #engBar {
-    display:none; gap:10px; flex-wrap:wrap;
+    display:none; gap:10px; flex-wrap:wrap; align-items:center;
     padding: 10px 18px 0;
   }
-  body.eng #engBar { display:flex; }
+  body.eng-account #engBar { display:flex; }
+  #editTools { display:none; gap:10px; flex-wrap:wrap; }
+  body.eng #editTools { display:flex; }
+  #viewModeBtn.previewing {
+    border-color:var(--red-bright); color:var(--red-bright); font-weight:700;
+  }
+  #previewNote {
+    display:none; color:var(--text-dim); font-size:12.5px;
+  }
+  body.previewing #previewNote { display:inline; }
 
   /* ---------- tree ---------- */
   #tree, #searchResults { padding: 10px 12px 30px; }
   .f-row {
     display:flex; align-items:center; gap:6px;
-    min-height:46px; padding:4px 6px;
-    border-radius:9px; border:1.5px solid transparent;
+    min-height:48px; padding:4px 10px 4px 2px;
+    margin:7px 0 4px;
+    background:#1c1c1b;                       /* band, sits between page and cards */
+    border:1.5px solid var(--line);
+    border-left:4px solid var(--red-deep);
+    border-radius:8px;
     font-size:16px;
   }
-  .f-row.dragover { border-color:var(--red-bright); background:rgba(234,55,46,.08); }
+  .f-row.dragover { border-color:var(--red-bright); background:rgba(234,55,46,.10); }
   .f-toggle {
     flex-shrink:0; width:38px; height:38px;
     background:none; border:none; color:var(--text-dim);
@@ -213,14 +226,21 @@
     font-size:21px; font-weight:800; color:var(--white); line-height:1.1;
   }
   .d-text { flex:1; min-width:0; }
-  .d-num {
-    font-size:17px; font-weight:700; font-variant-numeric:tabular-nums;
+  /* primary line = description when there is one, otherwise the number */
+  .d-primary {
+    font-size:17.5px; font-weight:700;
     white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
   }
-  .d-desc {
+  .d-secondary {
     font-size:13.5px; color:var(--text-dim); margin-top:3px;
+    font-variant-numeric:tabular-nums; letter-spacing:.02em;
     white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
   }
+  .d-meta {
+    font-size:12.5px; color:var(--text-dim); margin-top:3px;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .d-meta b { color:var(--white); font-weight:600; }
   .d-tags { display:flex; gap:10px; margin-top:3px; font-size:12px; color:var(--text-dim); flex-wrap:wrap; }
   .d-cat { border:1px solid var(--line); border-radius:6px; padding:0 6px; }
   .d-side {
@@ -350,13 +370,38 @@
     font-family:"Friz Quadrata Pro","Friz Quadrata",Georgia,serif; }
   #viewerBar .vb-title { font-weight:700; font-size:15.5px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   #viewerBar .spacer { margin-left:auto; }
+  #viewerInfo {
+    display:none; gap:18px; flex-wrap:wrap;
+    background:#1c1c1b; border-bottom:1px solid var(--line);
+    padding:9px 16px; font-size:13.5px; color:var(--text-dim);
+  }
+  #viewerInfo.show { display:flex; }
+  #viewerInfo b { color:var(--white); font-weight:600; }
   #viewerFrameWrap { flex:1; position:relative; overflow:hidden; }
-  #viewerFrame { position:absolute; inset:0; width:100%; height:100%; border:none; background:#fff; }
+  #viewerFrame { position:absolute; inset:0; width:100%; height:100%; border:none; background:#fff; display:none; }
+  #viewerFrame.show { display:block; }
   #viewerNote {
+    display:none;
     position:absolute; left:0; right:0; bottom:0;
     background:rgba(14,10,10,.92); color:var(--text-dim);
     font-size:13px; padding:10px 16px; text-align:center;
   }
+  #viewerNote.show { display:block; }
+  #viewerFallback {
+    display:none; position:absolute; inset:0;
+    flex-direction:column; align-items:center; justify-content:center;
+    text-align:center; padding:30px 26px; gap:14px;
+  }
+  #viewerFallback.show { display:flex; }
+  #viewerFallback strong { font-size:18px; }
+  #viewerFallback p { color:var(--text-dim); font-size:14.5px; line-height:1.6; max-width:440px; }
+  #viewerFallback .big {
+    background:var(--red-deep); border:none; border-radius:10px;
+    color:var(--white); font-family:inherit; font-size:17px; font-weight:700;
+    padding:16px 30px; cursor:pointer; min-height:var(--touch-min);
+  }
+  #fbEngHint { display:none; font-size:13px; color:var(--text-dim); max-width:440px; }
+  body.eng #fbEngHint { display:block; }
 
   /* ---------- flag sheet (floor report) ---------- */
   #sheetOverlay { display:none; position:fixed; inset:0; z-index:60; background:rgba(0,0,0,.6); }
@@ -432,10 +477,14 @@
   <div class="pills" id="pillBar"></div>
 
   <div id="engBar">
-    <button class="mini" id="addDrawingBtn">＋ Drawing</button>
-    <button class="mini" id="addFolderBtn">＋ Folder</button>
-    <button class="mini" id="expandAllBtn">Expand all</button>
-    <button class="mini" id="collapseAllBtn">Collapse all</button>
+    <button class="mini" id="viewModeBtn">👁 View as floor</button>
+    <span id="previewNote">Floor view — editing off</span>
+    <span id="editTools">
+      <button class="mini" id="addDrawingBtn">＋ Drawing</button>
+      <button class="mini" id="addFolderBtn">＋ Folder</button>
+      <button class="mini" id="expandAllBtn">Expand all</button>
+      <button class="mini" id="collapseAllBtn">Collapse all</button>
+    </span>
   </div>
 
   <div id="updateBanner"></div>
@@ -464,9 +513,16 @@
     <button class="mini" id="vOpenBtn">Open in OneDrive ↗</button>
     <button class="mini" id="vCloseBtn">✕ Close</button>
   </div>
+  <div id="viewerInfo"></div>
   <div id="viewerFrameWrap">
     <iframe id="viewerFrame" title="Drawing PDF"></iframe>
-    <div id="viewerNote">If the drawing doesn't appear here, tap "Open in OneDrive".</div>
+    <div id="viewerNote">Not loading? Tap "Open in OneDrive" above.</div>
+    <div id="viewerFallback">
+      <strong>Open this drawing in OneDrive</strong>
+      <p>OneDrive won't show this one inside the app. Tap below — it opens in a new tab, then just close that tab to come back.</p>
+      <button class="big" id="fbOpenBtn">Open in OneDrive ↗</button>
+      <span id="fbEngHint">To preview it here instead: in OneDrive open the file → ⋯ → Embed, then paste that embed link into this drawing's Embed field.</span>
+    </div>
   </div>
 </div>
 
@@ -479,11 +535,19 @@
       <input type="text" id="fLink" placeholder="Paste the 'Anyone with the link' URL" autocomplete="off">
       <div class="hint" id="linkStatus"></div>
     </div>
+    <div class="o-field">
+      <label for="fEmbed">Embed link <span style="text-transform:none; letter-spacing:0;">(optional — enables in-app preview)</span></label>
+      <input type="text" id="fEmbed" placeholder="Paste OneDrive's Embed code or URL" autocomplete="off">
+      <div class="hint" id="embedStatus">In OneDrive: open the file → ⋯ → Embed → copy. Paste the whole snippet or just the URL. Without this, the drawing opens in a OneDrive tab instead.</div>
+    </div>
+    <div class="o-field">
+      <label for="fFilename">Paste the PDF filename <span style="text-transform:none; letter-spacing:0;">(splits into number + description)</span></label>
+      <input type="text" id="fFilename" placeholder='e.g. SL0035 - Bronze Bush' autocomplete="off">
+    </div>
     <div class="two-col">
       <div class="o-field">
         <label for="fNumber">Drawing number</label>
-        <input type="text" id="fNumber" placeholder="e.g. SL-Galaxy-0022" autocomplete="off">
-        <div class="hint">Same as the PDF filename. Filled automatically when the link contains it.</div>
+        <input type="text" id="fNumber" placeholder="e.g. SL0035" autocomplete="off">
       </div>
       <div class="o-field">
         <label for="fRev">Revision</label>
@@ -491,8 +555,14 @@
       </div>
     </div>
     <div class="o-field">
-      <label for="fName">Description <span style="text-transform:none; letter-spacing:0;">(optional)</span></label>
-      <input type="text" id="fName" placeholder="e.g. Lifter Arm Weldment" autocomplete="off">
+      <label for="fName">Description <span style="text-transform:none; letter-spacing:0;">(optional — shown as the main line)</span></label>
+      <input type="text" id="fName" placeholder="e.g. Bronze Bush" autocomplete="off">
+    </div>
+    <div class="o-field">
+      <label>Part info <span style="text-transform:none; letter-spacing:0;">(material etc — shown to the floor)</span></label>
+      <div id="dMetaRows"></div>
+      <button class="mini" id="dAddRow">＋ Add row</button>
+      <div class="hint">Per-part details: raw material, material code, finish, anything the floor needs at the machine.</div>
     </div>
     <div class="o-field">
       <label for="fCategory">Category</label>
@@ -514,7 +584,8 @@
     <div class="o-actions">
       <button class="primary" id="dwgSaveBtn">Save drawing</button>
       <button class="ghost" id="dwgCancelBtn">Cancel</button>
-      <button class="mini danger" id="dwgHideBtn" style="display:none; margin-left:auto;">Hide from floor</button>
+      <button class="mini" id="dwgHideBtn" style="display:none; margin-left:auto;">Hide from floor</button>
+      <button class="mini danger" id="dwgDeleteBtn" style="display:none;">Delete</button>
     </div>
     <div class="o-msg" id="dwgMsg"></div>
   </div>
@@ -616,12 +687,12 @@ const firebaseConfig = {
    security rules (see README) — the rules are the real enforcement. */
 const ENGINEERING_EMAILS = ["design@stellamarine.com.au"];
 
-const APP_VERSION = "3.0";
+const APP_VERSION = "3.1";
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { getFirestore, collection, getDocs, doc, getDoc, setDoc, addDoc, updateDoc,
+import { getFirestore, collection, getDocs, doc, setDoc, addDoc, updateDoc,
          deleteDoc, query, where, writeBatch, serverTimestamp }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
@@ -638,7 +709,9 @@ let drawingsIn  = new Map();    // folderId ("root" = unfiled) -> sorted [drawin
 let categories  = [];           // {id, name, order}
 let openFlags   = [];           // unresolved flags
 let flaggedIds  = new Set();
-let isEng = false;
+let isEngAccount = false;       // signed in as a design/engineering account
+let previewFloor = false;       // design account temporarily viewing as the floor
+let isEng = false;              // effective editing mode = isEngAccount && !previewFloor
 let activeCategory = null;      // category id or null = All
 let searchTerm = "";
 let expanded = new Set();       // folderIds currently open
@@ -657,8 +730,9 @@ function saveExpanded() {
 
 /* ================= auth ================= */
 onAuthStateChanged(auth, user => {
-  isEng = !!user && ENGINEERING_EMAILS.includes((user.email || "").toLowerCase());
-  document.body.classList.toggle("eng", isEng);
+  isEngAccount = !!user && ENGINEERING_EMAILS.includes((user.email || "").toLowerCase());
+  previewFloor = false;
+  applyMode();
   if (user) {
     $("authView").classList.remove("show");
     $("appView").classList.add("show");
@@ -670,6 +744,23 @@ onAuthStateChanged(auth, user => {
     $("loginEmail").focus();
   }
 });
+/* effective mode: the design account can drop into the floor view to check it */
+function applyMode() {
+  isEng = isEngAccount && !previewFloor;
+  document.body.classList.toggle("eng-account", isEngAccount);
+  document.body.classList.toggle("eng", isEng);
+  document.body.classList.toggle("previewing", isEngAccount && previewFloor);
+  $("viewModeBtn").textContent = previewFloor ? "✎ Back to editing" : "👁 View as floor";
+  $("viewModeBtn").classList.toggle("previewing", previewFloor);
+}
+$("viewModeBtn").addEventListener("click", () => {
+  previewFloor = !previewFloor;
+  applyMode();
+  renderFlagsBadge();
+  buildPills();      // the ⚙ Categories pill is editing-only
+  render();
+});
+
 async function doLogin() {
   const email = $("loginEmail").value.trim(), pass = $("loginPass").value;
   const err = $("loginErr");
@@ -702,7 +793,7 @@ async function load() {
       getDocs(query(collection(db, "flags"), where("resolved", "==", false))),
     ]);
     drawings = dSnap.docs.map(d => ({ id: d.id, ...d.data() }))
-      .filter(d => d.currentLink && (isEng || !d.hidden));
+      .filter(d => d.currentLink && (isEngAccount || !d.hidden));
     foldersById = new Map(fSnap.docs.map(f => [f.id, { id: f.id, ...f.data() }]));
     categories = cSnap.docs.map(c => ({ id: c.id, ...c.data() }))
       .sort((a,b) => (a.order ?? 0) - (b.order ?? 0) || (a.name||"").localeCompare(b.name||""));
@@ -780,9 +871,6 @@ function flatTree() {
   walk("root", 0);
   return out;
 }
-function slugify(s) {
-  return (s||"").trim().replace(/[\/\\\s'"#?%]+/g, "-").replace(/-+/g,"-").replace(/^-|-$/g,"");
-}
 function cmpRev(a, b) {
   a = (a||"").toUpperCase().trim(); b = (b||"").toUpperCase().trim();
   const na = parseInt(a,10), nb = parseInt(b,10);
@@ -803,6 +891,42 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({
     "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
   }[c]));
+}
+/* key/value map → "Material: 6mm 5083 · Code: AL5083" (escaped, values bold) */
+function metaEntries(meta) {
+  return Object.entries(meta || {}).filter(([k,v]) => k && v !== "" && v != null);
+}
+function metaLine(meta) {
+  return metaEntries(meta)
+    .map(([k,v]) => `${escapeHtml(k)}: <b>${escapeHtml(String(v))}</b>`)
+    .join(" &nbsp;·&nbsp; ");
+}
+/* "SL0035 - Bronze Bush" → { number:"SL0035", desc:"Bronze Bush" } */
+function splitNumberDesc(s) {
+  const raw = String(s || "").trim().replace(/\.pdf$/i, "");
+  const m = raw.match(/^(.+?)\s+[-–—]\s+(.+)$/);
+  return m ? { number: m[1].trim(), desc: m[2].trim() } : { number: raw, desc: "" };
+}
+/* a drawing with the same number already on record (ignoring one id) */
+function findByNumber(number, exceptId) {
+  const n = String(number || "").trim().toLowerCase();
+  return drawings.find(d => d.id !== exceptId && (d.drawingNumber || "").trim().toLowerCase() === n) || null;
+}
+/* OneDrive's Embed option gives an <iframe …> snippet; accept that or a bare URL */
+function extractEmbedUrl(s) {
+  const v = String(s || "").trim();
+  if (!v) return "";
+  const m = v.match(/src\s*=\s*["']([^"']+)["']/i);
+  const url = m ? m[1] : v;
+  return /^https?:\/\//i.test(url) ? url : "";
+}
+/* only frame links that are actually meant to be framed */
+function embeddableSrc(d) {
+  const e = (d.embedLink || "").trim();
+  if (e) return e;
+  const link = d.currentLink || "";
+  if (/action=embedview|\/embed\.aspx|\/embed\?/i.test(link)) return link;
+  return null;     // plain share links are refused by SharePoint — use the fallback
 }
 /* pull the PDF filename out of a OneDrive/SharePoint link when it's present */
 function filenameFromLink(url) {
@@ -966,8 +1090,9 @@ function drawingRow(d, depth, showPath) {
         <span class="rev-letter">${escapeHtml(d.currentRevision || "–")}</span>
       </div>
       <div class="d-text">
-        <div class="d-num">${escapeHtml(d.drawingNumber || "(no number)")}${d.hidden ? ' <span style="color:var(--text-dim); font-weight:400;">(hidden)</span>' : ""}</div>
-        ${d.drawingName ? `<div class="d-desc">${escapeHtml(d.drawingName)}</div>` : ""}
+        <div class="d-primary">${escapeHtml(d.drawingName || d.drawingNumber || "(no number)")}${d.hidden ? ' <span style="color:var(--text-dim); font-weight:400;">(hidden)</span>' : ""}</div>
+        ${d.drawingName && d.drawingNumber ? `<div class="d-secondary">${escapeHtml(d.drawingNumber)}</div>` : ""}
+        ${metaLine(d.meta) ? `<div class="d-meta">${metaLine(d.meta)}</div>` : ""}
         <div class="d-tags">
           ${d.categoryId && catName(d.categoryId) ? `<span class="d-cat">${escapeHtml(catName(d.categoryId))}</span>` : ""}
           ${showPath ? `<span class="d-path">${escapeHtml(d.folderId && foldersById.has(d.folderId) ? pathOf(d.folderId).split("/").join(" / ") : "Unfiled")}</span>` : ""}
@@ -1026,8 +1151,26 @@ function renderSearch() {
 function openViewer(d) {
   viewerDrawing = d;
   $("vRev").textContent = "REV " + (d.currentRevision || "–");
-  $("vTitle").textContent = (d.drawingNumber || "") + (d.drawingName ? " — " + d.drawingName : "");
-  $("viewerFrame").src = d.currentLink;
+  $("vTitle").textContent = [d.drawingNumber, d.drawingName].filter(Boolean).join(" — ");
+
+  const info = $("viewerInfo");
+  const line = metaLine(d.meta);
+  info.innerHTML = line;
+  info.classList.toggle("show", !!line);
+
+  const src = embeddableSrc(d);
+  const frame = $("viewerFrame");
+  if (src) {
+    frame.src = src;
+    frame.classList.add("show");
+    $("viewerNote").classList.add("show");
+    $("viewerFallback").classList.remove("show");
+  } else {
+    frame.src = "about:blank";
+    frame.classList.remove("show");
+    $("viewerNote").classList.remove("show");
+    $("viewerFallback").classList.add("show");
+  }
   $("viewerOverlay").classList.add("show");
 }
 function closeViewer() {
@@ -1035,6 +1178,9 @@ function closeViewer() {
   $("viewerFrame").src = "about:blank";
   viewerDrawing = null;
 }
+$("fbOpenBtn").addEventListener("click", () => {
+  if (viewerDrawing) window.open(viewerDrawing.currentLink, "_blank", "noopener");
+});
 $("vCloseBtn").addEventListener("click", closeViewer);
 $("vOpenBtn").addEventListener("click", () => { if (viewerDrawing) window.open(viewerDrawing.currentLink, "_blank", "noopener"); });
 $("vFlagBtn").addEventListener("click", () => { if (viewerDrawing) openFlagSheet(viewerDrawing); });
@@ -1158,15 +1304,23 @@ function renderFlagList() {
 
 /* ================= drawing form ================= */
 const LINK_HINT = 'Right-click the PDF in Explorer → Share → "Anyone with the link" → Can view → Copy.';
+const EMBED_HINT = "In OneDrive: open the file → ⋯ → Embed → copy. Paste the whole snippet or just the URL. Without this, the drawing opens in a OneDrive tab instead.";
 function openDrawingForm(d, presetFolderId) {
   editDrawing = d || null;
   formFolderId = d ? (d.folderId && foldersById.has(d.folderId) ? d.folderId : null)
                    : (presetFolderId || null);
   $("dwgFormTitle").textContent = d ? "Edit drawing" : "Add drawing";
   $("fLink").value   = d ? (d.currentLink || "") : "";
+  $("fEmbed").value  = d ? (d.embedLink || "") : "";
+  $("fFilename").value = "";
   $("fNumber").value = d ? (d.drawingNumber || "") : "";
   $("fRev").value    = d ? (d.currentRevision || "") : "";
   $("fName").value   = d ? (d.drawingName || "") : "";
+  $("dMetaRows").innerHTML = "";
+  const dmeta = (d && d.meta) || {};
+  const dkeys = Object.keys(dmeta);
+  if (!dkeys.length) addDrawingMetaRow("", "");
+  for (const k of dkeys) addDrawingMetaRow(k, dmeta[k]);
   buildCategorySelect(d ? d.categoryId : null);
   updateFolderBtn();
   $("dwgMsg").textContent = ""; $("dwgMsg").className = "o-msg";
@@ -1174,11 +1328,57 @@ function openDrawingForm(d, presetFolderId) {
   pendingSave = null;
   $("dwgHideBtn").style.display = d ? "" : "none";
   $("dwgHideBtn").textContent = d && d.hidden ? "Unhide (show on floor)" : "Hide from floor";
+  $("dwgDeleteBtn").style.display = d ? "" : "none";
   $("linkStatus").textContent = LINK_HINT;
   $("linkStatus").style.color = "";
   $("drawingOverlay").classList.add("show");
   if (!d) $("fLink").focus();
 }
+function addDrawingMetaRow(k, v) {
+  const row = document.createElement("div");
+  row.className = "kv-row";
+  row.innerHTML = `
+    <input type="text" class="k" placeholder="Key — e.g. Raw material" list="metaKeys" autocomplete="off">
+    <input type="text" class="v" placeholder="Value — e.g. 6mm 5083 plate" autocomplete="off">
+    <button class="mini danger" title="Remove row">×</button>`;
+  row.querySelector(".k").value = k;
+  row.querySelector(".v").value = v;
+  row.querySelector("button").onclick = () => row.remove();
+  $("dMetaRows").appendChild(row);
+}
+$("dAddRow").addEventListener("click", () => addDrawingMetaRow("", ""));
+
+/* paste "SL0035 - Bronze Bush" (or the whole filename) → split into the fields */
+function applyFilename(raw) {
+  const { number, desc } = splitNumberDesc(raw);
+  if (number) $("fNumber").value = number;
+  if (desc)   $("fName").value = desc;
+}
+$("fFilename").addEventListener("input", () => {
+  const v = $("fFilename").value;
+  if (v.trim()) applyFilename(v);
+});
+/* typing the combined form straight into the number field works too */
+$("fNumber").addEventListener("blur", () => {
+  const v = $("fNumber").value;
+  if (/\s[-–—]\s/.test(v) && !$("fName").value.trim()) applyFilename(v);
+});
+$("fEmbed").addEventListener("input", () => {
+  const v = $("fEmbed").value.trim();
+  const st = $("embedStatus");
+  if (!v) { st.textContent = EMBED_HINT; st.style.color = ""; return; }
+  const url = extractEmbedUrl(v);
+  if (!url) {
+    st.textContent = "Couldn't find a URL in that — paste OneDrive's Embed snippet or the embed URL itself.";
+    st.style.color = "var(--red-bright)";
+  } else if (!/action=embedview|\/embed\.aspx|\/embed\?/i.test(url)) {
+    st.textContent = "That looks like a normal share link, not an embed link — it probably won't preview in the app.";
+    st.style.color = "var(--red-bright)";
+  } else {
+    st.textContent = "Embed link looks right — this drawing will preview in the app.";
+    st.style.color = "";
+  }
+});
 $("addDrawingBtn").addEventListener("click", () => openDrawingForm(null, null));
 $("dwgCancelBtn").addEventListener("click", () => $("drawingOverlay").classList.remove("show"));
 
@@ -1261,34 +1461,43 @@ $("dwgSaveBtn").addEventListener("click", async () => {
     return;
   }
 
-  const id = slugify(number);
-  const payload = { name, number, rev, link, folderId: formFolderId, categoryId, newCategoryName, id };
-
-  const snap = await getDoc(doc(db, "drawings", id));
-  if (snap.exists()) {
-    const cur = snap.data();
-    const c = cmpRev(rev, cur.currentRevision);
-    if (c <= 0 && !(editDrawing && editDrawing.id === id && c === 0)) {
-      // same-rev save of the record you're editing = normal correction, no warning;
-      // anything else equal/older gets the explicit confirm
-      pendingSave = payload;
-      $("revWarnText").innerHTML =
-        `<strong>${escapeHtml(number)}</strong> already exists at revision ` +
-        `<strong>${escapeHtml(cur.currentRevision||"?")}</strong>. ` +
-        (c === 0
-          ? `You're saving the <strong>same revision</strong> — fine if you're correcting the link or details.`
-          : `You're saving an <strong>older revision (${escapeHtml(rev)})</strong>. The floor will see this as current. Only do this if the newer revision was issued in error.`);
-      $("revWarn").classList.add("show");
-      return;
-    }
+  const meta = {};
+  for (const row of $("dMetaRows").children) {
+    const k = row.querySelector(".k").value.trim();
+    const v = row.querySelector(".v").value.trim();
+    if (k && v) meta[k] = v;
   }
-  await commitDrawing(payload, snap.exists() ? snap.data() : null);
+  const embedLink = extractEmbedUrl($("fEmbed").value);
+
+  /* the record id never changes with the number, so renumbering is just an
+     edit — but two records must never share a number */
+  const clash = findByNumber(number, editDrawing ? editDrawing.id : null);
+  if (clash) {
+    msg.className = "o-msg bad";
+    msg.textContent = editDrawing
+      ? `Another drawing already uses ${clash.drawingNumber}. Pick a different number.`
+      : `${clash.drawingNumber} is already on record${clash.drawingName ? " (" + clash.drawingName + ")" : ""} at rev ${clash.currentRevision || "?"}. Close this and use its ✎ button to update it.`;
+    return;
+  }
+
+  const payload = { name, number, rev, link, embedLink, meta,
+                    folderId: formFolderId, categoryId, newCategoryName };
+
+  if (editDrawing && cmpRev(rev, editDrawing.currentRevision) < 0) {
+    pendingSave = payload;
+    $("revWarnText").innerHTML =
+      `This drawing is on record at revision <strong>${escapeHtml(editDrawing.currentRevision||"?")}</strong>. ` +
+      `You're saving an <strong>older revision (${escapeHtml(rev)})</strong>. The floor will see this as current. ` +
+      `Only do this if the newer revision was issued in error.`;
+    $("revWarn").classList.add("show");
+    return;
+  }
+  await commitDrawing(payload);
 });
 $("revConfirmBtn").addEventListener("click", async () => {
   $("revWarn").classList.remove("show");
   if (pendingSave) {
-    const snap = await getDoc(doc(db, "drawings", pendingSave.id));
-    await commitDrawing(pendingSave, snap.exists() ? snap.data() : null, true);
+    await commitDrawing(pendingSave, true);
     pendingSave = null;
   }
 });
@@ -1297,9 +1506,10 @@ $("revCancelBtn").addEventListener("click", () => {
   pendingSave = null;
 });
 
-async function commitDrawing(p, previous, forced = false) {
+async function commitDrawing(p, forced = false) {
   const msg = $("dwgMsg");
   const who = (auth.currentUser && auth.currentUser.email) || "engineering";
+  const previous = editDrawing;
   try {
     let categoryId = p.categoryId;
     if (p.newCategoryName) {
@@ -1313,18 +1523,27 @@ async function commitDrawing(p, previous, forced = false) {
         categoryId = ref.id;
       }
     }
-    await setDoc(doc(db, "drawings", p.id), {
+    const fields = {
       drawingName:      p.name,
       drawingNumber:    p.number,
       folderId:         p.folderId,
       folderPath:       pathOf(p.folderId),
       categoryId:       categoryId,
+      meta:             p.meta,
       currentRevision:  p.rev,
       currentLink:      p.link,
+      embedLink:        p.embedLink || "",
       currentUpdatedAt: serverTimestamp(),
       currentUpdatedBy: who,
-    }, { merge: true });
-    await addDoc(collection(db, "drawings", p.id, "revisions"), {
+    };
+    let docId;
+    if (previous) {
+      docId = previous.id;
+      await setDoc(doc(db, "drawings", docId), fields, { merge: true });
+    } else {
+      docId = (await addDoc(collection(db, "drawings"), fields)).id;
+    }
+    await addDoc(collection(db, "drawings", docId, "revisions"), {
       revision:   p.rev,
       link:       p.link,
       savedAt:    serverTimestamp(),
@@ -1350,8 +1569,32 @@ $("dwgHideBtn").addEventListener("click", async () => {
   try {
     await updateDoc(doc(db, "drawings", editDrawing.id), { hidden: !editDrawing.hidden });
     $("drawingOverlay").classList.remove("show");
+    editDrawing = null;
     await load();
   } catch (err) { alert("Couldn't update — " + err.message); }
+});
+
+$("dwgDeleteBtn").addEventListener("click", async () => {
+  if (!editDrawing) return;
+  const label = [editDrawing.drawingNumber, editDrawing.drawingName].filter(Boolean).join(" — ");
+  if (!confirm(
+    `Delete ${label} from the app?\n\n` +
+    `The floor will no longer see it. The PDF in OneDrive is NOT touched — ` +
+    `only this record goes.\n\nThis can't be undone.`)) return;
+  const btn = $("dwgDeleteBtn");
+  btn.disabled = true;
+  try {
+    // close any open flags first so they don't point at a missing record
+    for (const fl of openFlags.filter(f => f.drawingId === editDrawing.id))
+      await updateDoc(doc(db, "flags", fl.id), { resolved: true, resolvedAt: serverTimestamp() });
+    await deleteDoc(doc(db, "drawings", editDrawing.id));
+    $("drawingOverlay").classList.remove("show");
+    editDrawing = null;
+    await load();
+  } catch (err) {
+    alert("Couldn't delete — " + err.message);
+  }
+  btn.disabled = false;
 });
 
 /* ================= folder form ================= */

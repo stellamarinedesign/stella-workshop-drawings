@@ -1,4 +1,4 @@
-# Stella Marine — Drawings (v3)
+# Stella Marine — Drawings (v3.1)
 
 Shop-floor drawing lookup. PDFs stay in OneDrive; this app stores only metadata
 and "Anyone with the link" share URLs in Firestore. Updating a PDF in OneDrive
@@ -21,10 +21,24 @@ add/edit drawings in an overlay, manage folders inline, drag things around.
 ## How editing works (design account)
 - **＋ Drawing / ＋ Folder** in the toolbar, or the **＋ Dwg / ＋ Sub** buttons
   on any folder row to add directly into it.
-- The drawing form is an overlay. Paste the OneDrive link first — the drawing
-  number is read from the PDF filename when the link contains it (opaque share
-  links don't always; then type it — it's the same as the filename by
-  convention). Description is optional.
+- **👁 View as floor** switches the design account into the read-only floor
+  view to check how things look; the same button switches back. No second
+  login needed.
+- The drawing form is an overlay. Paste the OneDrive link, then paste the PDF
+  filename into the **Paste the PDF filename** field — `SL0035 - Bronze Bush`
+  splits automatically into number `SL0035` and description `Bronze Bush`.
+  (Auto-reading the name straight out of the link only works when the URL
+  contains it; OneDrive's opaque share links don't, hence the paste field.)
+- **Part info** on each drawing is a free-form key/value list (raw material,
+  material code, finish…). It shows under the drawing on the floor and in the
+  viewer's info strip. Folders have their own info too, for whole-project notes.
+- **Delete** in the drawing form removes the record for good (the OneDrive PDF
+  is untouched). **Hide from floor** is the softer option — the record stays,
+  the floor stops seeing it. Deleting closes any open flags on that drawing;
+  its revision history stays in Firestore as an audit record.
+- Changing a drawing's number just updates it — records are keyed by an
+  internal id, so renumbering never creates a second copy. Two drawings can't
+  share a number; the form says so if you try.
 - **Categories** are workstation types (Machining, Fabrication, …). Manage them
   from the ⚙ pill; assign one per drawing in the form. The pills filter the
   floor view: a category hides non-matching drawings and any folder branch
@@ -35,13 +49,26 @@ add/edit drawings in an overlay, manage folders inline, drag things around.
   nothing is ever orphaned, and OneDrive links are never affected.
 - Flags reported from the floor appear as a red badge in the header.
 
-## In-page PDF viewer — one caveat
-Tapping a drawing opens it in an overlay iframe. Whether the PDF actually
-renders there is decided by SharePoint's frame policy, not by this app: plain
-share links sometimes refuse to load inside another page. The overlay always
-has an **Open in OneDrive** button as the fallback. If previews stay blank,
-use OneDrive's **Embed** option on the file and paste that link instead of the
-plain share link — embed links are made for iframes.
+## In-page PDF preview needs an embed link
+SharePoint refuses to be framed by another site: a plain "Anyone with the link"
+share URL loads as *"…sharepoint.com refused to connect."* inside the app. That
+is SharePoint's policy, not something this app can override — no setting, proxy
+or trick on our side changes it, and the PDF can't be fetched and re-rendered
+locally either because SharePoint sends no CORS headers to this origin.
+
+The supported way in is OneDrive's own **Embed** link, which Microsoft
+generates specifically to be framed:
+
+1. In OneDrive (web), open or select the PDF → **⋯** → **Embed**.
+2. Copy the generated snippet (or just its URL).
+3. Paste it into the drawing's **Embed link** field. The whole
+   `<iframe …>` snippet is fine — the app pulls the URL out of it.
+
+With an embed link, the drawing previews inside the app. Without one, tapping a
+drawing shows a clean full-screen **Open in OneDrive** button instead of a
+broken frame — usable either way, so embed links can be added gradually.
+Note an embed link is a second, separately revocable share of the file; both
+links keep serving the latest version of the PDF.
 
 ## One-time Firebase setup
 1. Firebase console → project `stella-workshop-drawings`.
@@ -146,22 +173,28 @@ categories/{autoId}               ← workstation types (the filter pills)
   name        "Machining"
   order       number
 
-drawings/{slug-of-drawing-number}
-  drawingNumber      "SL-Galaxy-0022"   ← primary identity = PDF filename
-  drawingName        "Lifter Arm Weldment"   ← optional description
+drawings/{autoId}                 ← auto id, NOT derived from the number, so
+                                    renumbering is a plain field update
+  drawingNumber      "SL0035"     ← from the PDF filename, before the " - "
+  drawingName        "Bronze Bush"    ← description; shown as the main line
   folderId           folderId
   folderPath         "Fabrication/Lifters/Universal"
                                   ← human-readable mirror of the folder chain;
                                     the app keeps it in sync automatically
   categoryId         null | categoryId
+  meta               { "Raw material": "6mm 5083 plate", … }
+                                  ← per-part info, free-form, shown to the floor
   currentRevision    "B"
   currentLink        "https://…sharepoint.com/…"   ← OneDrive Anyone link
+  embedLink          "https://…action=embedview"   ← optional; enables in-app preview
   currentUpdatedAt   timestamp
   currentUpdatedBy   email of saver
-  hidden             true         ← optional; hides from floor (no deletes)
+  hidden             true         ← optional; hides from floor without deleting
 
 drawings/{id}/revisions/{auto}    ← audit trail, one per save, append-only
   revision, link, savedAt, savedBy, forced, replaced
+                                  ← rules forbid deleting these, so a deleted
+                                    drawing leaves its history behind on purpose
 
 flags/{auto}                      ← floor-reported problems
   drawingId, drawingName, drawingNumber, reason,
