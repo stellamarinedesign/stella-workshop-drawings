@@ -64,6 +64,32 @@ function allowedTarget(raw) {
   return ok ? t : null;
 }
 
+/* SharePoint hands out several link shapes and they don't all honour the same
+   download trick, so try the known ones in turn and keep the first that
+   actually returns a file:
+     1. the link itself with ?download=1   — works for /:b:/r/… path links
+     2. /_layouts/15/download.aspx?share=TOKEN — the documented endpoint for
+        short /:b:/g/personal/USER/TOKEN share links
+   Order matters: cheapest/most general first. */
+function candidateUrls(target) {
+  const list = [];
+
+  const direct = new URL(target.toString());
+  direct.searchParams.set("download", "1");
+  list.push(direct.toString());
+
+  /* /:b:/g/personal/<user>/<token>  →  /personal/<user>/_layouts/15/download.aspx?share=<token> */
+  const seg = target.pathname.split("/").filter(Boolean);   // [":b:", "g", "personal", user, token]
+  const gIdx = seg.findIndex(s => s === "g");
+  if (gIdx >= 0 && seg[gIdx + 1] === "personal" && seg.length >= gIdx + 4) {
+    const user  = seg[gIdx + 2];
+    const token = seg[seg.length - 1];
+    list.push(`${target.origin}/personal/${user}/_layouts/15/download.aspx`
+              + `?share=${encodeURIComponent(token)}`);
+  }
+  return list;
+}
+
 export default {
   async fetch(request) {
     const origin = request.headers.get("Origin") || "";
@@ -80,9 +106,6 @@ export default {
     if (!target)
       return fail(403, "That isn't a OneDrive or SharePoint link.", origin);
 
-    /* ask SharePoint for the file itself rather than its viewer page */
-    target.searchParams.set("download", "1");
-
     const headers = {
       /* SharePoint serves anonymous links differently to unknown agents */
       "User-Agent": "Mozilla/5.0 (compatible; StellaDrawings/1.0)",
@@ -94,25 +117,33 @@ export default {
     if (isHead)      headers["Range"] = "bytes=0-0";
     else if (range)  headers["Range"] = range;
 
-    let upstream;
-    try {
-      upstream = await fetch(target.toString(), { redirect: "follow", headers });
-    } catch (err) {
-      return fail(502, "Couldn't reach OneDrive: " + err.message, origin);
+    let upstream = null, lastStatus = 0, sawHtml = false;
+    for (const candidate of candidateUrls(target)) {
+      let res;
+      try {
+        res = await fetch(candidate, { redirect: "follow", headers });
+      } catch (err) {
+        return fail(502, "Couldn't reach OneDrive: " + err.message, origin);
+      }
+      lastStatus = res.status;
+      if (!res.ok && res.status !== 206) { await res.body?.cancel(); continue; }
+      /* HTML means a sign-in or viewer page came back instead of the file */
+      if ((res.headers.get("Content-Type") || "").toLowerCase().includes("text/html")) {
+        sawHtml = true;
+        await res.body?.cancel();
+        continue;
+      }
+      upstream = res;
+      break;
     }
 
-    if (!upstream.ok && upstream.status !== 206)
-      return fail(502,
-        `OneDrive returned ${upstream.status}. The link may have been revoked, `
-        + `or the file renamed or moved.`, origin);
-
-    /* An HTML body means OneDrive served a sign-in or error page instead of
-       the file — the usual cause is the share not being "Anyone with the link". */
-    const type = (upstream.headers.get("Content-Type") || "").toLowerCase();
-    if (type.includes("text/html"))
-      return fail(403,
-        "OneDrive wants a sign-in for this file. Re-share it as "
-        + '"Anyone with the link" and paste the new link.', origin);
+    if (!upstream)
+      return fail(sawHtml ? 403 : 502, sawHtml
+        ? 'OneDrive sent a web page instead of the file. Check the drawing is '
+          + 'still shared as "Anyone with the link", and that the link points at '
+          + 'the PDF itself.'
+        : `OneDrive returned ${lastStatus}. The link may have been revoked, or `
+          + `the file renamed or moved.`, origin);
 
     const out = new Headers(corsHeaders(origin));
     out.set("Content-Type", "application/pdf");
