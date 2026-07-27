@@ -920,6 +920,14 @@ function extractEmbedUrl(s) {
   const url = m ? m[1] : v;
   return /^https?:\/\//i.test(url) ? url : "";
 }
+/* Observed on the floor iPads: OneDrive Embed links render only for viewers who
+   already have a Microsoft session — everyone else gets
+   "login.microsoftonline.com refused to connect" inside the frame. So embed
+   previews are offered to the design account only; the floor gets the
+   Open-in-OneDrive panel instead of a login error. Flip to false if the tenant
+   is ever configured to allow anonymous embed viewing. */
+const EMBED_NEEDS_MS_LOGIN = true;
+
 /* only frame links that are actually meant to be framed */
 function embeddableSrc(d) {
   const e = (d.embedLink || "").trim();
@@ -1158,7 +1166,7 @@ function openViewer(d) {
   info.innerHTML = line;
   info.classList.toggle("show", !!line);
 
-  const src = embeddableSrc(d);
+  const src = (!EMBED_NEEDS_MS_LOGIN || isEng) ? embeddableSrc(d) : null;
   const frame = $("viewerFrame");
   if (src) {
     frame.src = src;
