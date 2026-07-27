@@ -36,9 +36,13 @@ add/edit drawings in an overlay, manage folders inline, drag things around.
   fields below if a name breaks the pattern. (Reading the name out of the link
   itself only works when the URL contains it; opaque share links don't, hence
   the paste field.)
-- **Part info** on each drawing is a free-form key/value list (raw material,
-  material code, finish…). It shows under the drawing on the floor and in the
-  viewer's info strip. Folders have their own info too, for whole-project notes.
+- **Part info** on each drawing is a free-form key/value list. The suggested
+  keys are **Material code** and **Material description** — set those and they
+  lead the viewer's header strip in stores order ("SL0325 · 16mm x 6m Solid
+  Round Bar 316 S/S") and show on the tile. Pasting a full stores line like
+  `SL0325 - 16mm x 6m Solid Round Bar 316 S/S` into the Material code value
+  splits itself across both fields. Other keys (finish, notes…) follow after.
+  Folders have their own info too, for whole-project notes.
 - **Delete** in the drawing form removes the record for good (the OneDrive PDF
   is untouched). **Hide from floor** is the softer option — the record stays,
   the floor stops seeing it. Deleting closes any open flags on that drawing;

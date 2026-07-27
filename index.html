@@ -636,8 +636,8 @@
   </div>
 </div>
 <datalist id="metaKeys">
-  <option value="Raw material"></option>
   <option value="Material code"></option>
+  <option value="Material description"></option>
   <option value="Notes"></option>
 </datalist>
 
@@ -710,7 +710,7 @@ const ENGINEERING_EMAILS = ["design@stellamarine.com.au"];
    drawings open in OneDrive instead. */
 const PROXY_BASE = "https://stella-drawings-proxy.design-fc7.workers.dev";
 
-const APP_VERSION = "3.5";
+const APP_VERSION = "3.6";
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut }
@@ -954,9 +954,18 @@ function escapeHtml(s) {
     "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
   }[c]));
 }
-/* key/value map → "Material: 6mm 5083 · Code: AL5083" (escaped, values bold) */
+/* key/value map → display entries. Material code + description lead, in that
+   order, so they read like the stores convention:
+   "SL0325 - 16mm x 6m Solid Round Bar 316 S/S". Other keys follow. */
+const META_PRIORITY = ["material code", "material description"];
 function metaEntries(meta) {
-  return Object.entries(meta || {}).filter(([k,v]) => k && v !== "" && v != null);
+  const rank = ([k]) => {
+    const i = META_PRIORITY.indexOf(String(k).trim().toLowerCase());
+    return i < 0 ? META_PRIORITY.length : i;
+  };
+  return Object.entries(meta || {})
+    .filter(([k,v]) => k && v !== "" && v != null)
+    .sort((a, b) => rank(a) - rank(b));
 }
 function metaLine(meta) {
   return metaEntries(meta)
@@ -1045,11 +1054,7 @@ function buildPills() {
   for (const c of categories)
     mk(c.name, activeCategory === c.id, () => {
       activeCategory = activeCategory === c.id ? null : c.id;
-      if (activeCategory) {          // open every branch that has matches so they're visible
-        for (const f of foldersById.values()) if (subtreeCount(f.id) > 0) expanded.add(f.id);
-        saveExpanded();
-      }
-      buildPills(); render();
+      buildPills(); render();      // filter only — which folders are open is untouched
     });
   if (isEng) mk("⚙ Categories", false, openCategoryManager, "manage");
 }
@@ -1241,6 +1246,7 @@ function openViewer(d) {
   $("fbReason").textContent = "";
   $("viewerFallback").classList.remove("show");
   $("pdfPages").innerHTML = "";
+  $("pdfScroll").scrollTo(0, 0);
   $("viewerOverlay").classList.add("show");
 
   const proxied = proxySrc(d);
@@ -1308,9 +1314,24 @@ async function loadPdfInto(d, url) {
     showViewerFallback("The preview service didn't answer. Check the wifi, or open it in OneDrive.");
   }
 }
-async function renderPdfPages(sess) {
+/* anchor = {ax, ay, ratio}: keep the content point that sat at viewport
+   position (ax, ay) in place across a re-render at ratio × the old zoom.
+   Without it, clearing the container resets the scroller to the top-left —
+   the "snap" this exists to prevent. A placeholder min-size keeps the
+   scroll range valid while pages stream back in. */
+async function renderPdfPages(sess, anchor) {
   const cont = $("pdfPages");
+  const scroller = $("pdfScroll");
+  cont.style.minHeight = ""; cont.style.minWidth = "";
+  const prevH = cont.scrollHeight, prevW = cont.scrollWidth;
+  const prevLeft = scroller.scrollLeft, prevTop = scroller.scrollTop;
   cont.innerHTML = "";
+  if (anchor) {
+    cont.style.minHeight = Math.ceil(prevH * anchor.ratio) + "px";
+    cont.style.minWidth  = Math.ceil(prevW * anchor.ratio) + "px";
+    scroller.scrollLeft = Math.max(0, (prevLeft + anchor.ax) * anchor.ratio - anchor.ax);
+    scroller.scrollTop  = Math.max(0, (prevTop  + anchor.ay) * anchor.ratio - anchor.ay);
+  }
   const width = Math.max(280, $("pdfScroll").clientWidth - 20);
   const dprBase = Math.min(window.devicePixelRatio || 1, 3);
   for (let i = 1; i <= pdfDoc.numPages; i++) {
@@ -1334,11 +1355,22 @@ async function renderPdfPages(sess) {
     }).promise;
     if (i === 1) $("pdfLoading").classList.remove("show");   // first page up ASAP
   }
+  cont.style.minHeight = ""; cont.style.minWidth = "";       // drop the placeholder
   $("pdfLoading").classList.remove("show");
 }
-function setZoom(z) {
-  pdfZoom = Math.min(4, Math.max(0.5, z));
-  if (pdfDoc) { viewSession++; renderPdfPages(viewSession); }
+/* zoom anchored on (ax, ay) in viewport coords — defaults to the centre */
+function setZoom(z, ax, ay) {
+  const newZoom = Math.min(4, Math.max(0.5, z));
+  if (!pdfDoc || newZoom === pdfZoom) return;
+  const scroller = $("pdfScroll");
+  const ratio = newZoom / pdfZoom;
+  pdfZoom = newZoom;
+  viewSession++;
+  renderPdfPages(viewSession, {
+    ax: ax ?? scroller.clientWidth / 2,
+    ay: ay ?? scroller.clientHeight / 2,
+    ratio,
+  });
 }
 $("vZoomIn").addEventListener("click", () => setZoom(pdfZoom * 1.3));
 $("vZoomOut").addEventListener("click", () => setZoom(pdfZoom / 1.3));
@@ -1373,26 +1405,21 @@ $("vZoomFit").addEventListener("click", () => setZoom(1));
   }, { passive: false });
   const endPinch = () => {
     if (!pinch) return;
-    const { k, midX, midY, left, top } = pinch;
+    const { k, midX, midY } = pinch;
     pinch = null;
     pagesEl.style.transform = "";
     if (!pdfDoc || Math.abs(k - 1) < 0.02) return;
-    const oldZoom = pdfZoom;
-    pdfZoom = Math.min(4, Math.max(0.5, oldZoom * k));
-    const ratio = pdfZoom / oldZoom;
-    viewSession++;
-    renderPdfPages(viewSession).then(() => {
-      scroller.scrollLeft = (left + midX) * ratio - midX;
-      scroller.scrollTop  = (top  + midY) * ratio - midY;
-    });
+    setZoom(pdfZoom * k, midX, midY);    // anchored re-render, no snap
   };
   scroller.addEventListener("touchend", e => { if (e.touches.length < 2) endPinch(); });
   scroller.addEventListener("touchcancel", endPinch);
-  /* desktop trackpads deliver pinch as ctrl+wheel */
+  /* desktop trackpads deliver pinch as ctrl+wheel — anchor on the cursor */
   scroller.addEventListener("wheel", e => {
     if (!e.ctrlKey) return;
     e.preventDefault();
-    setZoom(pdfZoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15));
+    const r = scroller.getBoundingClientRect();
+    setZoom(pdfZoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15),
+            e.clientX - r.left, e.clientY - r.top);
   }, { passive: false });
 }
 $("fbOpenBtn").addEventListener("click", () => {
@@ -1535,7 +1562,10 @@ function openDrawingForm(d, presetFolderId) {
   $("dMetaRows").innerHTML = "";
   const dmeta = (d && d.meta) || {};
   const dkeys = Object.keys(dmeta);
-  if (!dkeys.length) addDrawingMetaRow("", "");
+  if (!dkeys.length) {
+    addDrawingMetaRow("Material code", "");        // paste "SL0325 - 16mm x 6m …"
+    addDrawingMetaRow("Material description", ""); // here and it splits itself
+  }
   for (const k of dkeys) addDrawingMetaRow(k, dmeta[k]);
   buildCategorySelect(d ? d.categoryId : null);
   updateFolderBtn();
@@ -1554,12 +1584,25 @@ function addDrawingMetaRow(k, v) {
   const row = document.createElement("div");
   row.className = "kv-row";
   row.innerHTML = `
-    <input type="text" class="k" placeholder="Key — e.g. Raw material" list="metaKeys" autocomplete="off">
-    <input type="text" class="v" placeholder="Value — e.g. 6mm 5083 plate" autocomplete="off">
+    <input type="text" class="k" placeholder="Key — e.g. Material code" list="metaKeys" autocomplete="off">
+    <input type="text" class="v" placeholder="Value — e.g. SL0325" autocomplete="off">
     <button class="mini danger" title="Remove row">×</button>`;
   row.querySelector(".k").value = k;
   row.querySelector(".v").value = v;
   row.querySelector("button").onclick = () => row.remove();
+  /* pasting the full stores line "SL0325 - 16mm x 6m Solid Round Bar 316 S/S"
+     into Material code splits it across code + description */
+  row.querySelector(".v").addEventListener("blur", () => {
+    if (row.querySelector(".k").value.trim().toLowerCase() !== "material code") return;
+    const m = row.querySelector(".v").value.match(/^(.+?)\s+[-–—]\s+(.+)$/);
+    if (!m) return;
+    row.querySelector(".v").value = m[1].trim();
+    const descRow = [...$("dMetaRows").children].find(r =>
+      r.querySelector(".k").value.trim().toLowerCase() === "material description");
+    if (!descRow) addDrawingMetaRow("Material description", m[2].trim());
+    else if (!descRow.querySelector(".v").value.trim())
+      descRow.querySelector(".v").value = m[2].trim();
+  });
   $("dMetaRows").appendChild(row);
 }
 $("dAddRow").addEventListener("click", () => addDrawingMetaRow("", ""));
@@ -1863,8 +1906,8 @@ function addMetaRow(k, v) {
   const row = document.createElement("div");
   row.className = "kv-row";
   row.innerHTML = `
-    <input type="text" class="k" placeholder="Key — e.g. Raw material" list="metaKeys" autocomplete="off">
-    <input type="text" class="v" placeholder="Value — e.g. 6mm 5083 plate" autocomplete="off">
+    <input type="text" class="k" placeholder="Key — e.g. Notes" list="metaKeys" autocomplete="off">
+    <input type="text" class="v" placeholder="Value" autocomplete="off">
     <button class="mini danger" title="Remove row">×</button>`;
   row.querySelector(".k").value = k;
   row.querySelector(".v").value = v;
