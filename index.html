@@ -400,6 +400,7 @@
     color:var(--white); font-family:inherit; font-size:17px; font-weight:700;
     padding:16px 30px; cursor:pointer; min-height:var(--touch-min);
   }
+  #fbReason { font-size:13.5px; color:var(--red-bright); max-width:440px; line-height:1.5; }
   #fbEngHint { display:none; font-size:13px; color:var(--text-dim); max-width:440px; }
   body.eng #fbEngHint { display:block; }
 
@@ -521,7 +522,8 @@
       <strong>Open this drawing in OneDrive</strong>
       <p>OneDrive won't show this one inside the app. Tap below — it opens in a new tab, then just close that tab to come back.</p>
       <button class="big" id="fbOpenBtn">Open in OneDrive ↗</button>
-      <span id="fbEngHint">To preview it here instead: in OneDrive open the file → ⋯ → Embed, then paste that embed link into this drawing's Embed field.</span>
+      <span id="fbReason"></span>
+      <span id="fbEngHint">If this keeps happening, check the file is still shared as "Anyone with the link".</span>
     </div>
   </div>
 </div>
@@ -687,7 +689,12 @@ const firebaseConfig = {
    security rules (see README) — the rules are the real enforcement. */
 const ENGINEERING_EMAILS = ["design@stellamarine.com.au"];
 
-const APP_VERSION = "3.1";
+/* PDF preview proxy — paste the workers.dev URL here after deploying
+   worker/drawings-proxy.js (steps in the README). Empty = no in-app preview,
+   drawings open in OneDrive instead. */
+const PROXY_BASE = "";
+
+const APP_VERSION = "3.2";
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut }
@@ -928,6 +935,18 @@ function extractEmbedUrl(s) {
    is ever configured to allow anonymous embed viewing. */
 const EMBED_NEEDS_MS_LOGIN = true;
 
+/* the proxy re-serves an "Anyone with the link" PDF so any page can show it,
+   with no Microsoft sign-in — this is the route the floor iPads use */
+function proxySrc(d) {
+  if (!PROXY_BASE) return null;
+  const link = d.currentLink || "";
+  try {
+    const h = new URL(link).hostname.toLowerCase();
+    if (!(h.endsWith(".sharepoint.com") || h === "1drv.ms")) return null;
+  } catch { return null; }
+  return PROXY_BASE.replace(/\/+$/, "") + "/?u=" + encodeURIComponent(link);
+}
+
 /* only frame links that are actually meant to be framed */
 function embeddableSrc(d) {
   const e = (d.embedLink || "").trim();
@@ -1166,20 +1185,40 @@ function openViewer(d) {
   info.innerHTML = line;
   info.classList.toggle("show", !!line);
 
-  const src = (!EMBED_NEEDS_MS_LOGIN || isEng) ? embeddableSrc(d) : null;
+  const proxied = proxySrc(d);
+  const src = proxied || ((!EMBED_NEEDS_MS_LOGIN || isEng) ? embeddableSrc(d) : null);
   const frame = $("viewerFrame");
+  $("fbReason").textContent = "";
   if (src) {
     frame.src = src;
     frame.classList.add("show");
     $("viewerNote").classList.add("show");
     $("viewerFallback").classList.remove("show");
+    /* the proxy speaks CORS, so we can ask whether it actually worked and
+       swap to the OneDrive button instead of leaving a broken frame */
+    if (proxied) probeProxy(proxied, d);
   } else {
-    frame.src = "about:blank";
-    frame.classList.remove("show");
-    $("viewerNote").classList.remove("show");
-    $("viewerFallback").classList.add("show");
+    showViewerFallback("");
   }
   $("viewerOverlay").classList.add("show");
+}
+function showViewerFallback(reason) {
+  $("viewerFrame").src = "about:blank";
+  $("viewerFrame").classList.remove("show");
+  $("viewerNote").classList.remove("show");
+  $("fbReason").textContent = reason || "";
+  $("viewerFallback").classList.add("show");
+}
+async function probeProxy(url, d) {
+  let reason = "";
+  try {
+    const res = await fetch(url, { method: "HEAD", cache: "no-store" });
+    if (res.ok) return;
+    reason = res.headers.get("X-Proxy-Error") || `Preview failed (${res.status}).`;
+  } catch {
+    reason = "The preview service didn't answer.";
+  }
+  if (viewerDrawing === d) showViewerFallback(reason);   // ignore if they moved on
 }
 function closeViewer() {
   $("viewerOverlay").classList.remove("show");

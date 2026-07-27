@@ -17,6 +17,9 @@ add/edit drawings in an overlay, manage folders inline, drag things around.
 - `assets/logo.svg` / `assets/logo.png` — Alternate logo (the version approved
   for online use). SVG renders in the header; PNG is the favicon and iPad
   home-screen icon.
+- `worker/drawings-proxy.js` — Cloudflare Worker that makes OneDrive PDFs
+  displayable inside the app. Deployed separately (see below); not served by
+  GitHub Pages.
 
 ## How editing works (design account)
 - **＋ Drawing / ＋ Folder** in the toolbar, or the **＋ Dwg / ＋ Sub** buttons
@@ -49,26 +52,49 @@ add/edit drawings in an overlay, manage folders inline, drag things around.
   nothing is ever orphaned, and OneDrive links are never affected.
 - Flags reported from the floor appear as a red badge in the header.
 
-## In-page PDF preview needs an embed link
-SharePoint refuses to be framed by another site: a plain "Anyone with the link"
-share URL loads as *"…sharepoint.com refused to connect."* inside the app. That
-is SharePoint's policy, not something this app can override — no setting, proxy
-or trick on our side changes it, and the PDF can't be fetched and re-rendered
-locally either because SharePoint sends no CORS headers to this origin.
+## In-page PDF preview (Cloudflare Worker)
+Browsers won't let this app display a SharePoint PDF directly: SharePoint
+refuses to be framed by another site and sends no CORS headers, and OneDrive's
+own Embed links demand a Microsoft sign-in that the floor accounts don't have.
+None of that is fixable from the page itself.
 
-The supported way in is OneDrive's own **Embed** link, which Microsoft
-generates specifically to be framed:
+`worker/drawings-proxy.js` solves it. It fetches the "Anyone with the link"
+PDF server-side, where those browser rules don't apply, and re-serves the bytes
+as an inline PDF the app may display. **OneDrive stays the master copy** —
+overwrite a file there and the floor sees the new revision, same as always.
+
+### Deploy it (once, free, no command line)
+1. Sign up at [cloudflare.com](https://cloudflare.com) — the free plan is
+   ample (100,000 requests/day; this app will use a tiny fraction).
+2. **Workers & Pages → Create → Workers → Create Worker**. Name it
+   `stella-drawings-proxy` → **Deploy**.
+3. **Edit code** → delete the sample → paste all of
+   `worker/drawings-proxy.js` → **Deploy**.
+4. Copy the worker URL (`https://stella-drawings-proxy.<something>.workers.dev`).
+5. Paste it into `PROXY_BASE` at the top of the script block in `index.html`,
+   then push. Leave `PROXY_BASE` empty to turn previewing off — drawings then
+   open in OneDrive instead.
+
+### What it will and won't fetch
+It only fetches `*.sharepoint.com` and `1drv.ms` URLs, so it can't be used as a
+general-purpose proxy, and it only reaches files you already shared as "Anyone
+with the link" — it grants no access to anything private. If a link needs a
+sign-in, the app shows the OneDrive button with the reason instead of a broken
+frame. Responses are `no-store`, so a revised PDF is never served stale.
+
+## Alternative: per-drawing embed links
+Each drawing also has an optional **Embed link** field. Embed links render only
+for viewers who already have a Microsoft session, so they're useless on the
+floor iPads — the proxy above is the route that works for everyone. The field
+stays as a fallback for engineering desktops when no proxy is configured:
 
 1. In OneDrive (web), open or select the PDF → **⋯** → **Embed**.
 2. Copy the generated snippet (or just its URL).
 3. Paste it into the drawing's **Embed link** field. The whole
    `<iframe …>` snippet is fine — the app pulls the URL out of it.
 
-With an embed link, the drawing previews inside the app. Without one, tapping a
-drawing shows a clean full-screen **Open in OneDrive** button instead of a
-broken frame — usable either way, so embed links can be added gradually.
-Note an embed link is a second, separately revocable share of the file; both
-links keep serving the latest version of the PDF.
+Without a proxy or an embed link, tapping a drawing shows a clean full-screen
+**Open in OneDrive** button rather than a broken frame — usable either way.
 
 ## One-time Firebase setup
 1. Firebase console → project `stella-workshop-drawings`.
