@@ -120,7 +120,7 @@ export default {
     /* short edge cache so repeat views (the common case on the floor) skip the
        OneDrive round-trip entirely. Only full-file GETs are cached; a revised
        PDF is at most CACHE_SECONDS stale, and only for viewers, not downloads. */
-    const CACHE_SECONDS = 600;
+    const CACHE_SECONDS = 300;
     const cacheable = !isHead && !range;
     const cacheKey = new Request(
       "https://cache.internal/?u=" + encodeURIComponent(target.toString()));

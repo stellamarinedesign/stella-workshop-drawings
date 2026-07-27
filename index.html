@@ -212,6 +212,11 @@
     padding:10px 6px 10px 12px; cursor:pointer;
   }
   .d-main:active { background:rgba(234,55,46,.05); }
+  .stamp-col {
+    flex-shrink:0; display:flex; flex-direction:column;
+    align-items:center; gap:3px;
+  }
+  .pg-count { font-size:10.5px; color:var(--text-dim); letter-spacing:.03em; }
   .rev-stamp {
     flex-shrink:0; width:48px; height:48px;
     border:2.5px solid var(--red-bright); border-radius:8px;
@@ -386,6 +391,7 @@
     -webkit-overflow-scrolling:touch;
     background:#161615;
     padding:12px 8px 30px;
+    touch-action: pan-x pan-y;   /* leave two-finger pinch to our handler */
   }
   #pdfPages canvas {
     display:block; margin:0 auto 14px;
@@ -704,12 +710,12 @@ const ENGINEERING_EMAILS = ["design@stellamarine.com.au"];
    drawings open in OneDrive instead. */
 const PROXY_BASE = "https://stella-drawings-proxy.design-fc7.workers.dev";
 
-const APP_VERSION = "3.4";
+const APP_VERSION = "3.5";
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { getFirestore, collection, getDocs, doc, setDoc, addDoc, updateDoc,
+import { getFirestore, collection, onSnapshot, doc, setDoc, addDoc, updateDoc,
          deleteDoc, query, where, writeBatch, serverTimestamp }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
@@ -754,8 +760,9 @@ onAuthStateChanged(auth, user => {
     $("authView").classList.remove("show");
     $("appView").classList.add("show");
     $("whoLabel").textContent = user.email || "";
-    load();
+    subscribeData();
   } else {
+    teardownData();
     $("appView").classList.remove("show");
     $("authView").classList.add("show");
     $("loginEmail").focus();
@@ -800,36 +807,74 @@ $("signOutBtn").addEventListener("click", async () => {
   if (confirm("Sign out? Someone will need the password to use this device again.")) await signOut(auth);
 });
 
-/* ================= load ================= */
-async function load() {
-  try {
-    const [dSnap, fSnap, cSnap, flSnap] = await Promise.all([
-      getDocs(collection(db, "drawings")),
-      getDocs(collection(db, "folders")),
-      getDocs(collection(db, "categories")),
-      getDocs(query(collection(db, "flags"), where("resolved", "==", false))),
-    ]);
-    drawings = dSnap.docs.map(d => ({ id: d.id, ...d.data() }))
-      .filter(d => d.currentLink && (isEngAccount || !d.hidden));
-    foldersById = new Map(fSnap.docs.map(f => [f.id, { id: f.id, ...f.data() }]));
-    categories = cSnap.docs.map(c => ({ id: c.id, ...c.data() }))
-      .sort((a,b) => (a.order ?? 0) - (b.order ?? 0) || (a.name||"").localeCompare(b.name||""));
-    openFlags = flSnap.docs.map(f => ({ id: f.id, ...f.data() }));
-    openFlags.sort((a,b) => tsMillis(a.flaggedAt) - tsMillis(b.flaggedAt));
-    flaggedIds = new Set(openFlags.map(f => f.drawingId));
-    rebuildIndexes();
-    $("countLabel").textContent = drawings.filter(d => !d.hidden).length + " drawings";
-    $("errorBanner").classList.remove("show");
-    renderFlagsBadge();
-    buildPills();
-    render();
-  } catch (err) {
+/* ================= live data =================
+   Firestore listeners instead of one-shot loads: a drawing saved at the desk
+   appears on the floor within a second or two, and only changed documents
+   cross the wire — far cheaper than any polling interval. */
+let unsubs = [];
+let gotData = { d: false, f: false, c: false };
+
+function subscribeData() {
+  if (unsubs.length) return;                     // already live
+  gotData = { d: false, f: false, c: false };
+
+  const onErr = err => {
+    console.error(err);
     $("errorBanner").textContent = "Couldn't load the drawing list. Check the wifi connection, then close and reopen the app. If it keeps failing, tell engineering.";
     $("errorBanner").classList.add("show");
-    $("tree").innerHTML = "";
-    console.error(err);
-  }
+  };
+
+  unsubs.push(onSnapshot(collection(db, "drawings"), snap => {
+    drawings = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+      .filter(d => d.currentLink && (isEngAccount || !d.hidden));
+    gotData.d = true;
+    refreshUI();
+  }, onErr));
+
+  unsubs.push(onSnapshot(collection(db, "folders"), snap => {
+    foldersById = new Map(snap.docs.map(f => [f.id, { id: f.id, ...f.data() }]));
+    gotData.f = true;
+    refreshUI();
+  }, onErr));
+
+  unsubs.push(onSnapshot(collection(db, "categories"), snap => {
+    categories = snap.docs.map(c => ({ id: c.id, ...c.data() }))
+      .sort((a,b) => (a.order ?? 0) - (b.order ?? 0) || (a.name||"").localeCompare(b.name||""));
+    gotData.c = true;
+    refreshUI();
+  }, onErr));
+
+  unsubs.push(onSnapshot(query(collection(db, "flags"), where("resolved", "==", false)), snap => {
+    openFlags = snap.docs.map(f => ({ id: f.id, ...f.data() }));
+    openFlags.sort((a,b) => tsMillis(a.flaggedAt) - tsMillis(b.flaggedAt));
+    flaggedIds = new Set(openFlags.map(f => f.drawingId));
+    renderFlagsBadge();
+    if ($("flagsOverlay").classList.contains("show")) renderFlagList();
+    refreshUI();
+  }, onErr));
+
   checkVersion();
+}
+function teardownData() {
+  for (const u of unsubs) u();
+  unsubs = [];
+  drawings = []; foldersById = new Map(); categories = []; openFlags = [];
+  flaggedIds = new Set();
+  $("tree").innerHTML = `<div class="state"><div class="spinner"></div>Loading drawings…</div>`;
+}
+
+/* re-render from fresh data without yanking the page out from under a reader */
+function refreshUI() {
+  if (!(gotData.d && gotData.f && gotData.c)) return;   // keep the spinner up
+  rebuildIndexes();
+  $("countLabel").textContent = drawings.filter(d => !d.hidden).length + " drawings";
+  $("errorBanner").classList.remove("show");
+  renderFlagsBadge();
+  buildPills();
+  const y = window.scrollY;
+  render();
+  window.scrollTo(0, y);
+  if ($("categoryOverlay").classList.contains("show")) renderCatList();
 }
 function tsMillis(ts) { return ts && ts.toMillis ? ts.toMillis() : 0; }
 
@@ -1117,9 +1162,12 @@ function drawingRow(d, depth, showPath) {
   const flagged = flaggedIds.has(d.id);
   row.innerHTML = `
     <div class="d-main" ${isEng ? 'draggable="true"' : ""}>
-      <div class="rev-stamp">
-        <span class="rev-label">Rev</span>
-        <span class="rev-letter">${escapeHtml(d.currentRevision || "–")}</span>
+      <div class="stamp-col">
+        <div class="rev-stamp">
+          <span class="rev-label">Rev</span>
+          <span class="rev-letter">${escapeHtml(d.currentRevision || "–")}</span>
+        </div>
+        ${d.pageCount ? `<span class="pg-count">${d.pageCount} page${d.pageCount === 1 ? "" : "s"}</span>` : ""}
       </div>
       <div class="d-text">
         <div class="d-primary">${escapeHtml(d.drawingName || d.drawingNumber || "(no number)")}${d.hidden ? ' <span style="color:var(--text-dim); font-weight:400;">(hidden)</span>' : ""}</div>
@@ -1250,6 +1298,9 @@ async function loadPdfInto(d, url) {
     const docLoaded = await lib.getDocument({ data: bytes }).promise;
     if (sess !== viewSession) { docLoaded.destroy(); return; }
     pdfDoc = docLoaded;
+    /* backfill the page count on older records whenever the design account views one */
+    if (isEngAccount && d.pageCount !== pdfDoc.numPages)
+      updateDoc(doc(db, "drawings", d.id), { pageCount: pdfDoc.numPages }).catch(() => {});
     await renderPdfPages(sess);
   } catch (err) {
     if (sess !== viewSession) return;
@@ -1261,13 +1312,15 @@ async function renderPdfPages(sess) {
   const cont = $("pdfPages");
   cont.innerHTML = "";
   const width = Math.max(280, $("pdfScroll").clientWidth - 20);
-  const dpr = Math.min(window.devicePixelRatio || 1, 3);
+  const dprBase = Math.min(window.devicePixelRatio || 1, 3);
   for (let i = 1; i <= pdfDoc.numPages; i++) {
     if (sess !== viewSession || !pdfDoc) return;
     const page = await pdfDoc.getPage(i);
     if (sess !== viewSession) return;
     const base = page.getViewport({ scale: 1 });
     const vp = page.getViewport({ scale: (width / base.width) * pdfZoom });
+    // cap the backing store so deep zoom on big sheets can't blow Safari's canvas memory
+    const dpr = Math.min(dprBase, 4096 / vp.width, 4096 / vp.height);
     const canvas = document.createElement("canvas");
     canvas.width = Math.floor(vp.width * dpr);
     canvas.height = Math.floor(vp.height * dpr);
@@ -1290,6 +1343,58 @@ function setZoom(z) {
 $("vZoomIn").addEventListener("click", () => setZoom(pdfZoom * 1.3));
 $("vZoomOut").addEventListener("click", () => setZoom(pdfZoom / 1.3));
 $("vZoomFit").addEventListener("click", () => setZoom(1));
+
+/* ---- pinch zoom: live CSS-scale preview while the fingers move, then a
+   sharp re-render anchored on the pinch point when they lift ---- */
+{
+  const scroller = $("pdfScroll"), pagesEl = $("pdfPages");
+  let pinch = null;
+  scroller.addEventListener("touchstart", e => {
+    if (e.touches.length !== 2) return;
+    const [a, b] = e.touches;
+    const r = scroller.getBoundingClientRect();
+    pinch = {
+      dist: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY),
+      midX: (a.clientX + b.clientX) / 2 - r.left,
+      midY: (a.clientY + b.clientY) / 2 - r.top,
+      left: scroller.scrollLeft, top: scroller.scrollTop,
+      k: 1,
+    };
+    pagesEl.style.transformOrigin =
+      (pinch.left + pinch.midX) + "px " + (pinch.top + pinch.midY) + "px";
+  }, { passive: true });
+  scroller.addEventListener("touchmove", e => {
+    if (!pinch || e.touches.length !== 2) return;
+    e.preventDefault();
+    const [a, b] = e.touches;
+    const d = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+    pinch.k = Math.min(4 / pdfZoom, Math.max(0.5 / pdfZoom, d / pinch.dist));
+    pagesEl.style.transform = "scale(" + pinch.k + ")";
+  }, { passive: false });
+  const endPinch = () => {
+    if (!pinch) return;
+    const { k, midX, midY, left, top } = pinch;
+    pinch = null;
+    pagesEl.style.transform = "";
+    if (!pdfDoc || Math.abs(k - 1) < 0.02) return;
+    const oldZoom = pdfZoom;
+    pdfZoom = Math.min(4, Math.max(0.5, oldZoom * k));
+    const ratio = pdfZoom / oldZoom;
+    viewSession++;
+    renderPdfPages(viewSession).then(() => {
+      scroller.scrollLeft = (left + midX) * ratio - midX;
+      scroller.scrollTop  = (top  + midY) * ratio - midY;
+    });
+  };
+  scroller.addEventListener("touchend", e => { if (e.touches.length < 2) endPinch(); });
+  scroller.addEventListener("touchcancel", endPinch);
+  /* desktop trackpads deliver pinch as ctrl+wheel */
+  scroller.addEventListener("wheel", e => {
+    if (!e.ctrlKey) return;
+    e.preventDefault();
+    setZoom(pdfZoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15));
+  }, { passive: false });
+}
 $("fbOpenBtn").addEventListener("click", () => {
   if (viewerDrawing) window.open(viewerDrawing.currentLink, "_blank", "noopener");
 });
@@ -1606,11 +1711,36 @@ $("revCancelBtn").addEventListener("click", () => {
   pendingSave = null;
 });
 
+/* count the PDF's pages by fetching it through the proxy — also primes the
+   edge cache, so the floor's first view of a new drawing is instant */
+async function fetchPageCount(link) {
+  const url = proxySrc({ currentLink: link });
+  if (!url) return null;
+  const probe = (async () => {
+    const [lib, res] = await Promise.all([loadPdfJs(), fetch(url, { cache: "no-store" })]);
+    if (!res.ok) return null;
+    const docLoaded = await lib.getDocument({ data: await res.arrayBuffer() }).promise;
+    const n = docLoaded.numPages;
+    docLoaded.destroy();
+    return n;
+  })().catch(() => null);
+  const timeout = new Promise(res => setTimeout(() => res(null), 12000));
+  return Promise.race([probe, timeout]);
+}
+
 async function commitDrawing(p, forced = false) {
   const msg = $("dwgMsg");
   const who = (auth.currentUser && auth.currentUser.email) || "engineering";
   const previous = editDrawing;
   try {
+    // page count: only re-probe when the link is new or it was never counted
+    let pageCount = previous ? (previous.pageCount ?? null) : null;
+    if (!previous || previous.currentLink !== p.link || previous.pageCount == null) {
+      msg.className = "o-msg";
+      msg.textContent = "Checking the PDF…";
+      pageCount = await fetchPageCount(p.link);
+      msg.textContent = "";
+    }
     let categoryId = p.categoryId;
     if (p.newCategoryName) {
       const existing = categories.find(c => (c.name||"").toLowerCase() === p.newCategoryName.toLowerCase());
@@ -1630,6 +1760,7 @@ async function commitDrawing(p, forced = false) {
       folderPath:       pathOf(p.folderId),
       categoryId:       categoryId,
       meta:             p.meta,
+      pageCount:        pageCount,
       currentRevision:  p.rev,
       currentLink:      p.link,
       currentUpdatedAt: serverTimestamp(),
@@ -1654,7 +1785,6 @@ async function commitDrawing(p, forced = false) {
     msg.textContent = `Saved ${p.number} rev ${p.rev}.`;
     editDrawing = null;
     if (p.folderId) { expanded.add(p.folderId); saveExpanded(); }
-    await load();
     setTimeout(() => $("drawingOverlay").classList.remove("show"), 700);
   } catch (err) {
     msg.className = "o-msg bad";
@@ -1669,7 +1799,6 @@ $("dwgHideBtn").addEventListener("click", async () => {
     await updateDoc(doc(db, "drawings", editDrawing.id), { hidden: !editDrawing.hidden });
     $("drawingOverlay").classList.remove("show");
     editDrawing = null;
-    await load();
   } catch (err) { alert("Couldn't update — " + err.message); }
 });
 
@@ -1689,7 +1818,6 @@ $("dwgDeleteBtn").addEventListener("click", async () => {
     await deleteDoc(doc(db, "drawings", editDrawing.id));
     $("drawingOverlay").classList.remove("show");
     editDrawing = null;
-    await load();
   } catch (err) {
     alert("Couldn't delete — " + err.message);
   }
@@ -1780,7 +1908,6 @@ $("feSave").addEventListener("click", async () => {
       saveExpanded();
     }
     $("folderOverlay").classList.remove("show");
-    await load();
   } catch (err) {
     msg.className = "o-msg bad";
     msg.textContent = "Save failed — " + err.message;
@@ -1820,7 +1947,6 @@ $("feDelete").addEventListener("click", async () => {
       for (const kid of movedKids) await syncPathsUnder(kid);
     }
     $("folderOverlay").classList.remove("show");
-    await load();
   } catch (err) {
     alert("Delete failed — " + err.message);
   }
@@ -1837,7 +1963,6 @@ async function moveFolder(f, newParentId) {
   foldersById.get(f.id).parentId = newParentId || null;
   await syncPathsUnder(f.id);
   if (newParentId) { expanded.add(newParentId); saveExpanded(); }
-  await load();
 }
 async function moveDrawing(drawingId, folderId) {
   await updateDoc(doc(db, "drawings", drawingId), {
@@ -1845,7 +1970,6 @@ async function moveDrawing(drawingId, folderId) {
     folderPath: pathOf(folderId),
   });
   expanded.add(folderId); saveExpanded();
-  await load();
 }
 async function reorderFolder(f, dir) {
   const sibs = [...(childrenOf.get(f.parentId || "root") || [])];
@@ -1856,7 +1980,6 @@ async function reorderFolder(f, dir) {
   const batch = writeBatch(db);
   sibs.forEach((s, idx) => batch.update(doc(db, "folders", s.id), { order: idx }));
   await batch.commit();
-  await load();
 }
 /* keep the human-readable folderPath mirror truthful after renames/moves */
 async function syncPathsUnder(folderId) {
@@ -1932,14 +2055,12 @@ function renderCatList() {
       const name = prompt("Rename category:", c.name);
       if (!name || !name.trim() || name.trim() === c.name) return;
       await updateDoc(doc(db, "categories", c.id), { name: name.trim() });
-      await load(); renderCatList();
     };
     row.querySelector('[data-act="del"]').onclick = async () => {
       if (used > 0) { alert(`"${c.name}" is set on ${used} drawing(s). Move them to another category first.`); return; }
       if (!confirm(`Delete category "${c.name}"?`)) return;
       await deleteDoc(doc(db, "categories", c.id));
       if (activeCategory === c.id) activeCategory = null;
-      await load(); renderCatList();
     };
     el.appendChild(row);
   }
@@ -1954,7 +2075,6 @@ $("catAddBtn").addEventListener("click", async () => {
     name: name.trim(),
     order: categories.length ? Math.max(...categories.map(c => c.order ?? 0)) + 1 : 0,
   });
-  await load(); renderCatList();
 });
 
 /* ================= expand / collapse all ================= */
@@ -1966,17 +2086,27 @@ $("collapseAllBtn").addEventListener("click", () => {
   expanded.clear(); saveExpanded(); render();
 });
 
-/* ================= version / staleness ================= */
+/* ================= version / staleness =================
+   Checked every minute (a ~30 KB fetch on wifi — negligible). When an update
+   is found: banner with a button immediately, and an automatic reload once
+   the device has been idle for a few minutes with nothing open, so parked
+   iPads keep themselves current without anyone touching them. */
+const VERSION_CHECK_MS = 60 * 1000;
+const IDLE_RELOAD_MS   = 3 * 60 * 1000;
+let updateVersion = null;
+let lastActivity = Date.now();
+
 $("verLabel").textContent = "v" + APP_VERSION;
 async function checkVersion() {
   const now = Date.now();
-  if (now - lastVersionCheck < 60 * 60 * 1000) return;
+  if (now - lastVersionCheck < 20 * 1000) return;   // visibilitychange politeness
   lastVersionCheck = now;
   try {
     const res  = await fetch(location.pathname + "?ts=" + now, { cache: "no-store" });
     const text = await res.text();
     const m = text.match(/APP_VERSION\s*=\s*"([^"]+)"/);
     if (m && m[1] !== APP_VERSION) {
+      updateVersion = m[1];
       const b = $("updateBanner");
       b.innerHTML = `A newer version of this app is available (v${escapeHtml(m[1])}).<br>
         <button id="reloadBtn">Update now</button>`;
@@ -1985,6 +2115,32 @@ async function checkVersion() {
     }
   } catch { /* offline — ignore */ }
 }
+
+for (const ev of ["touchstart", "mousedown", "keydown", "wheel", "scroll"])
+  addEventListener(ev, () => { lastActivity = Date.now(); }, { passive: true, capture: true });
+
+function anyOverlayOpen() {
+  return ["viewerOverlay","drawingOverlay","folderOverlay","categoryOverlay",
+          "flagsOverlay","pickerOverlay","flagSheet"]
+    .some(id => $(id).classList.contains("show"));
+}
+function maybeAutoReload() {
+  if (!updateVersion) return;
+  if (anyOverlayOpen()) return;                        // never mid-drawing or mid-form
+  if (Date.now() - lastActivity < IDLE_RELOAD_MS) return;
+  try {
+    // one attempt per version — if a CDN serves us the old file again after
+    // reloading, this stops an endless reload loop (banner still shows)
+    if (sessionStorage.getItem("autoReloadedFor") === updateVersion) return;
+    sessionStorage.setItem("autoReloadedFor", updateVersion);
+  } catch {}
+  location.reload();
+}
+setInterval(() => {
+  if (!auth.currentUser) return;
+  checkVersion();
+  maybeAutoReload();
+}, VERSION_CHECK_MS);
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible" && auth.currentUser) checkVersion();
 });

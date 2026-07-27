@@ -73,11 +73,15 @@ native PDF handling inside pages is broken (top-left corner, no scroll or zoom),
 so every device gets the same viewer. The library loads from cdnjs on first use.
 
 Speed: the worker tries SharePoint's download forms in parallel and answers with
-the first real file, and keeps a **10-minute edge cache** per link so repeat
+the first real file, and keeps a **5-minute edge cache** per link so repeat
 views skip OneDrive entirely. The trade-off: after overwriting a PDF in
-OneDrive, floor previews can lag up to 10 minutes behind (the "Open in
-OneDrive" button always serves the live file). Shorten `CACHE_SECONDS` in the
-worker if that window ever matters.
+OneDrive, floor previews can lag up to 5 minutes behind (the "Open in
+OneDrive" button always serves the live file). `CACHE_SECONDS` in the worker
+sets the window. Saving a drawing also pre-fetches its PDF (to count pages),
+which primes this cache — the floor's first view of a new drawing is instant.
+
+Zoom: −/＋/Fit buttons, pinch on touch screens, Ctrl+scroll (trackpad pinch)
+on desktops.
 
 ### Deploy it (once, free, no command line)
 1. Sign up at [cloudflare.com](https://cloudflare.com) — the free plan is
@@ -217,6 +221,9 @@ drawings/{autoId}                 ← auto id, NOT derived from the number, so
   categoryId         null | categoryId
   meta               { "Raw material": "6mm 5083 plate", … }
                                   ← per-part info, free-form, shown to the floor
+  pageCount          3 | null     ← counted automatically from the PDF at save
+                                    (and backfilled when the design account
+                                    views an older record); shown on the tile
   currentRevision    "B"
   currentLink        "https://…sharepoint.com/…"   ← OneDrive Anyone link
   currentUpdatedAt   timestamp
@@ -270,4 +277,11 @@ GitHub Pages serves from the `gh-pages` branch, so a deploy is two pushes:
   serves the latest file regardless; the stamp is metadata.
 - "Anyone" links are viewable by anyone who has the URL. The app data itself
   requires sign-in, but the PDFs behind the links keep that exposure level.
-- The app caches data at load; reopen (or the hourly self-check) picks up changes.
+- Drawing data is **live**: Firestore listeners push changes to every signed-in
+  device within a second or two of saving — no refresh needed, and cheaper on
+  the free tier than polling since only changed documents transfer.
+- App **updates** are checked every minute. A banner with an "Update now"
+  button appears immediately; a device that then sits idle for 3+ minutes with
+  no drawing or form open reloads itself, so parked iPads stay current
+  unattended. (One auto-attempt per version — a stale CDN can't cause a
+  reload loop.)
