@@ -28,10 +28,14 @@ add/edit drawings in an overlay, manage folders inline, drag things around.
   view to check how things look; the same button switches back. No second
   login needed.
 - The drawing form is an overlay. Paste the OneDrive link, then paste the PDF
-  filename into the **Paste the PDF filename** field — `SL0035 - Bronze Bush`
-  splits automatically into number `SL0035` and description `Bronze Bush`.
-  (Auto-reading the name straight out of the link only works when the URL
-  contains it; OneDrive's opaque share links don't, hence the paste field.)
+  filename into the **Paste the PDF filename** field. Names follow
+  `SL0035-BronzeBush` / `SL-Galaxy-2002-LowerArm-A`: the number runs up to the
+  last dash-segment containing a digit with no lowercase letters, the rest is
+  the description with CamelCase split into words → number `SL-Galaxy-2002`,
+  description `Lower Arm A`. The field shows what it decided; correct the two
+  fields below if a name breaks the pattern. (Reading the name out of the link
+  itself only works when the URL contains it; opaque share links don't, hence
+  the paste field.)
 - **Part info** on each drawing is a free-form key/value list (raw material,
   material code, finish…). It shows under the drawing on the floor and in the
   viewer's info strip. Folders have their own info too, for whole-project notes.
@@ -60,8 +64,20 @@ None of that is fixable from the page itself.
 
 `worker/drawings-proxy.js` solves it. It fetches the "Anyone with the link"
 PDF server-side, where those browser rules don't apply, and re-serves the bytes
-as an inline PDF the app may display. **OneDrive stays the master copy** —
-overwrite a file there and the floor sees the new revision, same as always.
+with CORS. **OneDrive stays the master copy** — overwrite a file there and the
+floor sees the new revision, same as always.
+
+The app then renders those bytes itself with pdf.js (canvas pages, fit-to-width,
+＋/−/Fit zoom) rather than leaving PDF display to the browser — iPad Safari's
+native PDF handling inside pages is broken (top-left corner, no scroll or zoom),
+so every device gets the same viewer. The library loads from cdnjs on first use.
+
+Speed: the worker tries SharePoint's download forms in parallel and answers with
+the first real file, and keeps a **10-minute edge cache** per link so repeat
+views skip OneDrive entirely. The trade-off: after overwriting a PDF in
+OneDrive, floor previews can lag up to 10 minutes behind (the "Open in
+OneDrive" button always serves the live file). Shorten `CACHE_SECONDS` in the
+worker if that window ever matters.
 
 ### Deploy it (once, free, no command line)
 1. Sign up at [cloudflare.com](https://cloudflare.com) — the free plan is
@@ -82,19 +98,10 @@ with the link" — it grants no access to anything private. If a link needs a
 sign-in, the app shows the OneDrive button with the reason instead of a broken
 frame. Responses are `no-store`, so a revised PDF is never served stale.
 
-## Alternative: per-drawing embed links
-Each drawing also has an optional **Embed link** field. Embed links render only
-for viewers who already have a Microsoft session, so they're useless on the
-floor iPads — the proxy above is the route that works for everyone. The field
-stays as a fallback for engineering desktops when no proxy is configured:
-
-1. In OneDrive (web), open or select the PDF → **⋯** → **Embed**.
-2. Copy the generated snippet (or just its URL).
-3. Paste it into the drawing's **Embed link** field. The whole
-   `<iframe …>` snippet is fine — the app pulls the URL out of it.
-
-Without a proxy or an embed link, tapping a drawing shows a clean full-screen
-**Open in OneDrive** button rather than a broken frame — usable either way.
+If the proxy is unreachable or a link stops working, tapping a drawing shows a
+full-screen **Open in OneDrive** button with the reason, rather than a broken
+frame. (OneDrive "Embed" links were tried and dropped: they demand a Microsoft
+sign-in the floor accounts don't have.)
 
 ## One-time Firebase setup
 1. Firebase console → project `stella-workshop-drawings`.
@@ -212,7 +219,6 @@ drawings/{autoId}                 ← auto id, NOT derived from the number, so
                                   ← per-part info, free-form, shown to the floor
   currentRevision    "B"
   currentLink        "https://…sharepoint.com/…"   ← OneDrive Anyone link
-  embedLink          "https://…action=embedview"   ← optional; enables in-app preview
   currentUpdatedAt   timestamp
   currentUpdatedBy   email of saver
   hidden             true         ← optional; hides from floor without deleting

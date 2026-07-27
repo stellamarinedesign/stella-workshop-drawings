@@ -91,7 +91,7 @@ function candidateUrls(target) {
 }
 
 export default {
-  async fetch(request) {
+  async fetch(request, env, ctx) {
     const origin = request.headers.get("Origin") || "";
 
     if (request.method === "OPTIONS")
@@ -117,47 +117,88 @@ export default {
     if (isHead)      headers["Range"] = "bytes=0-0";
     else if (range)  headers["Range"] = range;
 
-    let upstream = null, lastStatus = 0, sawHtml = false;
-    for (const candidate of candidateUrls(target)) {
-      let res;
-      try {
-        res = await fetch(candidate, { redirect: "follow", headers });
-      } catch (err) {
-        return fail(502, "Couldn't reach OneDrive: " + err.message, origin);
+    /* short edge cache so repeat views (the common case on the floor) skip the
+       OneDrive round-trip entirely. Only full-file GETs are cached; a revised
+       PDF is at most CACHE_SECONDS stale, and only for viewers, not downloads. */
+    const CACHE_SECONDS = 600;
+    const cacheable = !isHead && !range;
+    const cacheKey = new Request(
+      "https://cache.internal/?u=" + encodeURIComponent(target.toString()));
+    if (cacheable) {
+      const hit = await caches.default.match(cacheKey);
+      if (hit) {
+        const out2 = new Headers(hit.headers);
+        for (const [k, v] of Object.entries(corsHeaders(origin))) out2.set(k, v);
+        out2.set("Cache-Control", "no-store");
+        return new Response(hit.body, { status: 200, headers: out2 });
       }
-      lastStatus = res.status;
-      if (!res.ok && res.status !== 206) { await res.body?.cancel(); continue; }
-      /* HTML means a sign-in or viewer page came back instead of the file */
-      if ((res.headers.get("Content-Type") || "").toLowerCase().includes("text/html")) {
-        sawHtml = true;
-        await res.body?.cancel();
-        continue;
-      }
-      upstream = res;
-      break;
     }
 
-    if (!upstream)
-      return fail(sawHtml ? 403 : 502, sawHtml
-        ? 'OneDrive sent a web page instead of the file. Check the drawing is '
+    /* SharePoint link shapes don't all honour the same download form, so fire
+       the known ones IN PARALLEL and answer with the FIRST that returns an
+       actual file — never slower than one form alone. Late losers get their
+       bodies cancelled after the response has gone out. */
+    const isPdf = r => (r.ok || r.status === 206)
+      && !(r.headers.get("Content-Type") || "").toLowerCase().includes("text/html");
+    const attempts = candidateUrls(target).map(u =>
+      fetch(u, { redirect: "follow", headers })
+        .then(r => ({ res: r }), err => ({ err })));
+
+    const upstream = await new Promise(resolve => {
+      let pending = attempts.length, winner = null;
+      let lastStatus = 0, sawHtml = false, netErr = null;
+      for (const p of attempts) p.then(a => {
+        if (winner) { a.res?.body?.cancel(); checkDone(); return; }
+        if (a.res && isPdf(a.res)) { winner = a.res; resolve({ res: a.res }); checkDone(); return; }
+        if (a.err) netErr = a.err;
+        else if (!a.res.ok && a.res.status !== 206) { lastStatus = a.res.status; a.res.body?.cancel(); }
+        else { sawHtml = true; a.res.body?.cancel(); }
+        checkDone();
+      });
+      function checkDone() {
+        if (--pending === 0 && !winner) resolve({ lastStatus, sawHtml, netErr });
+      }
+    });
+    /* keep the worker alive until the losing fetches are tidied away */
+    ctx.waitUntil(Promise.allSettled(attempts));
+
+    if (!upstream.res) {
+      if (upstream.sawHtml)
+        return fail(403,
+          'OneDrive sent a web page instead of the file. Check the drawing is '
           + 'still shared as "Anyone with the link", and that the link points at '
-          + 'the PDF itself.'
-        : `OneDrive returned ${lastStatus}. The link may have been revoked, or `
-          + `the file renamed or moved.`, origin);
+          + 'the PDF itself.', origin);
+      if (upstream.lastStatus)
+        return fail(502,
+          `OneDrive returned ${upstream.lastStatus}. The link may have been `
+          + `revoked, or the file renamed or moved.`, origin);
+      return fail(502, "Couldn't reach OneDrive: "
+        + (upstream.netErr ? upstream.netErr.message : "no response"), origin);
+    }
 
     const out = new Headers(corsHeaders(origin));
     out.set("Content-Type", "application/pdf");
     out.set("Content-Disposition", "inline");
-    /* drawings are revised in place, so never hand back a stale copy */
+    /* browsers always revalidate with us; the freshness window lives at the edge */
     out.set("Cache-Control", "no-store");
 
     if (isHead)
       return new Response(null, { status: 200, headers: out });
 
     for (const h of ["Content-Length", "Content-Range", "Accept-Ranges"]) {
-      const v = upstream.headers.get(h);
+      const v = upstream.res.headers.get(h);
       if (v) out.set(h, v);
     }
-    return new Response(upstream.body, { status: upstream.status, headers: out });
+
+    /* full-file 200s: stream to the viewer and the edge cache at once */
+    if (cacheable && upstream.res.status === 200 && upstream.res.body) {
+      const [toClient, toCache] = upstream.res.body.tee();
+      const cacheHeaders = new Headers(out);
+      cacheHeaders.set("Cache-Control", "s-maxage=" + CACHE_SECONDS);
+      ctx.waitUntil(caches.default.put(cacheKey,
+        new Response(toCache, { status: 200, headers: cacheHeaders })));
+      return new Response(toClient, { status: 200, headers: out });
+    }
+    return new Response(upstream.res.body, { status: upstream.res.status, headers: out });
   },
 };

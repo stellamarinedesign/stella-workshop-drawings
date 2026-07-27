@@ -177,6 +177,7 @@
     border-left:4px solid var(--red-deep);
     border-radius:8px;
     font-size:16px;
+    cursor:pointer;
   }
   .f-row.dragover { border-color:var(--red-bright); background:rgba(234,55,46,.10); }
   .f-toggle {
@@ -378,15 +379,25 @@
   #viewerInfo.show { display:flex; }
   #viewerInfo b { color:var(--white); font-weight:600; }
   #viewerFrameWrap { flex:1; position:relative; overflow:hidden; }
-  #viewerFrame { position:absolute; inset:0; width:100%; height:100%; border:none; background:#fff; display:none; }
-  #viewerFrame.show { display:block; }
-  #viewerNote {
-    display:none;
-    position:absolute; left:0; right:0; bottom:0;
-    background:rgba(14,10,10,.92); color:var(--text-dim);
-    font-size:13px; padding:10px 16px; text-align:center;
+  /* pdf.js renders each page to a canvas inside this scroller — same behaviour
+     on iPads, phones and desktops, unlike native iframe PDF handling */
+  #pdfScroll {
+    position:absolute; inset:0; overflow:auto;
+    -webkit-overflow-scrolling:touch;
+    background:#161615;
+    padding:12px 8px 30px;
   }
-  #viewerNote.show { display:block; }
+  #pdfPages canvas {
+    display:block; margin:0 auto 14px;
+    background:#fff; box-shadow:0 3px 14px rgba(0,0,0,.5);
+  }
+  #pdfLoading {
+    position:absolute; inset:0; display:none;
+    flex-direction:column; align-items:center; justify-content:center;
+    color:var(--text-dim); font-size:14px; gap:14px;
+    pointer-events:none;
+  }
+  #pdfLoading.show { display:flex; }
   #viewerFallback {
     display:none; position:absolute; inset:0;
     flex-direction:column; align-items:center; justify-content:center;
@@ -510,14 +521,17 @@
     <span class="vb-rev" id="vRev"></span>
     <span class="vb-title" id="vTitle"></span>
     <span class="spacer"></span>
+    <button class="mini" id="vZoomOut" aria-label="Zoom out">−</button>
+    <button class="mini" id="vZoomIn" aria-label="Zoom in">＋</button>
+    <button class="mini" id="vZoomFit" aria-label="Fit to width">Fit</button>
     <button class="mini" id="vFlagBtn">⚑ Report</button>
     <button class="mini" id="vOpenBtn">Open in OneDrive ↗</button>
     <button class="mini" id="vCloseBtn">✕ Close</button>
   </div>
   <div id="viewerInfo"></div>
   <div id="viewerFrameWrap">
-    <iframe id="viewerFrame" title="Drawing PDF"></iframe>
-    <div id="viewerNote">Not loading? Tap "Open in OneDrive" above.</div>
+    <div id="pdfScroll"><div id="pdfPages"></div></div>
+    <div id="pdfLoading"><div class="spinner"></div>Fetching the drawing…</div>
     <div id="viewerFallback">
       <strong>Open this drawing in OneDrive</strong>
       <p>OneDrive won't show this one inside the app. Tap below — it opens in a new tab, then just close that tab to come back.</p>
@@ -538,13 +552,9 @@
       <div class="hint" id="linkStatus"></div>
     </div>
     <div class="o-field">
-      <label for="fEmbed">Embed link <span style="text-transform:none; letter-spacing:0;">(optional — enables in-app preview)</span></label>
-      <input type="text" id="fEmbed" placeholder="Paste OneDrive's Embed code or URL" autocomplete="off">
-      <div class="hint" id="embedStatus">In OneDrive: open the file → ⋯ → Embed → copy. Paste the whole snippet or just the URL. Without this, the drawing opens in a OneDrive tab instead.</div>
-    </div>
-    <div class="o-field">
       <label for="fFilename">Paste the PDF filename <span style="text-transform:none; letter-spacing:0;">(splits into number + description)</span></label>
-      <input type="text" id="fFilename" placeholder='e.g. SL0035 - Bronze Bush' autocomplete="off">
+      <input type="text" id="fFilename" placeholder="e.g. SL-Galaxy-2001-TransomBracket" autocomplete="off">
+      <div class="hint" id="filenameStatus"></div>
     </div>
     <div class="two-col">
       <div class="o-field">
@@ -694,7 +704,7 @@ const ENGINEERING_EMAILS = ["design@stellamarine.com.au"];
    drawings open in OneDrive instead. */
 const PROXY_BASE = "https://stella-drawings-proxy.design-fc7.workers.dev";
 
-const APP_VERSION = "3.3";
+const APP_VERSION = "3.4";
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut }
@@ -908,33 +918,36 @@ function metaLine(meta) {
     .map(([k,v]) => `${escapeHtml(k)}: <b>${escapeHtml(String(v))}</b>`)
     .join(" &nbsp;·&nbsp; ");
 }
-/* "SL0035 - Bronze Bush" → { number:"SL0035", desc:"Bronze Bush" } */
+/* Filename → number + description.
+   Actual convention is compact: "SL0035-BronzeBush",
+   "SL-Galaxy-2001-TransomBracket", "SL-Galaxy-2002-LowerArm-A".
+   Rule: the number runs up to the LAST dash-segment that looks like a code
+   (contains a digit, no lowercase letters — SL0035, 2001, 2002). Everything
+   after is description: CamelCase split into words, segments joined with
+   spaces → "Lower Arm A". Spaced "SL0035 - Bronze Bush" names still parse. */
+function camelToWords(s) {
+  return s.replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+          .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+          .trim();
+}
 function splitNumberDesc(s) {
   const raw = String(s || "").trim().replace(/\.pdf$/i, "");
-  const m = raw.match(/^(.+?)\s+[-–—]\s+(.+)$/);
-  return m ? { number: m[1].trim(), desc: m[2].trim() } : { number: raw, desc: "" };
+  const m = raw.match(/^(.+?)\s+[-–—]\s+(.+)$/);          // spaced form
+  if (m) return { number: m[1].trim(), desc: m[2].trim() };
+  const seg = raw.split("-").filter(Boolean);
+  let last = -1;
+  for (let i = 0; i < seg.length; i++)
+    if (/\d/.test(seg[i]) && !/[a-z]/.test(seg[i])) last = i;
+  if (last >= 0 && last < seg.length - 1)
+    return { number: seg.slice(0, last + 1).join("-"),
+             desc: seg.slice(last + 1).map(camelToWords).join(" ") };
+  return { number: raw, desc: "" };
 }
 /* a drawing with the same number already on record (ignoring one id) */
 function findByNumber(number, exceptId) {
   const n = String(number || "").trim().toLowerCase();
   return drawings.find(d => d.id !== exceptId && (d.drawingNumber || "").trim().toLowerCase() === n) || null;
 }
-/* OneDrive's Embed option gives an <iframe …> snippet; accept that or a bare URL */
-function extractEmbedUrl(s) {
-  const v = String(s || "").trim();
-  if (!v) return "";
-  const m = v.match(/src\s*=\s*["']([^"']+)["']/i);
-  const url = m ? m[1] : v;
-  return /^https?:\/\//i.test(url) ? url : "";
-}
-/* Observed on the floor iPads: OneDrive Embed links render only for viewers who
-   already have a Microsoft session — everyone else gets
-   "login.microsoftonline.com refused to connect" inside the frame. So embed
-   previews are offered to the design account only; the floor gets the
-   Open-in-OneDrive panel instead of a login error. Flip to false if the tenant
-   is ever configured to allow anonymous embed viewing. */
-const EMBED_NEEDS_MS_LOGIN = true;
-
 /* the proxy re-serves an "Anyone with the link" PDF so any page can show it,
    with no Microsoft sign-in — this is the route the floor iPads use */
 function proxySrc(d) {
@@ -947,14 +960,6 @@ function proxySrc(d) {
   return PROXY_BASE.replace(/\/+$/, "") + "/?u=" + encodeURIComponent(link);
 }
 
-/* only frame links that are actually meant to be framed */
-function embeddableSrc(d) {
-  const e = (d.embedLink || "").trim();
-  if (e) return e;
-  const link = d.currentLink || "";
-  if (/action=embedview|\/embed\.aspx|\/embed\?/i.test(link)) return link;
-  return null;     // plain share links are refused by SharePoint — use the fallback
-}
 /* pull the PDF filename out of a OneDrive/SharePoint link when it's present */
 function filenameFromLink(url) {
   try {
@@ -1074,12 +1079,12 @@ function folderRow(f, depth, count) {
       <button class="mini" data-act="down" title="Move down">↓</button>
     </span>`;
 
-  const toggle = () => {
+  // anywhere on the band toggles, except its action buttons
+  row.addEventListener("click", e => {
+    if (e.target.closest("button") && !e.target.closest(".f-toggle")) return;
     if (expanded.has(f.id)) expanded.delete(f.id); else expanded.add(f.id);
     saveExpanded(); render();
-  };
-  row.querySelector(".f-toggle").onclick = toggle;
-  row.querySelector(".f-name").onclick = toggle;
+  });
 
   if (isEng) {
     row.querySelector('[data-act="adddwg"]').onclick = () => openDrawingForm(null, f.id);
@@ -1185,46 +1190,106 @@ function openViewer(d) {
   info.innerHTML = line;
   info.classList.toggle("show", !!line);
 
-  const proxied = proxySrc(d);
-  const src = proxied || ((!EMBED_NEEDS_MS_LOGIN || isEng) ? embeddableSrc(d) : null);
-  const frame = $("viewerFrame");
   $("fbReason").textContent = "";
-  if (src) {
-    frame.src = src;
-    frame.classList.add("show");
-    $("viewerNote").classList.add("show");
-    $("viewerFallback").classList.remove("show");
-    /* the proxy speaks CORS, so we can ask whether it actually worked and
-       swap to the OneDrive button instead of leaving a broken frame */
-    if (proxied) probeProxy(proxied, d);
-  } else {
-    showViewerFallback("");
-  }
+  $("viewerFallback").classList.remove("show");
+  $("pdfPages").innerHTML = "";
   $("viewerOverlay").classList.add("show");
+
+  const proxied = proxySrc(d);
+  if (proxied) loadPdfInto(d, proxied);
+  else showViewerFallback("");
 }
 function showViewerFallback(reason) {
-  $("viewerFrame").src = "about:blank";
-  $("viewerFrame").classList.remove("show");
-  $("viewerNote").classList.remove("show");
+  viewSession++;
+  $("pdfLoading").classList.remove("show");
+  $("pdfPages").innerHTML = "";
   $("fbReason").textContent = reason || "";
   $("viewerFallback").classList.add("show");
 }
-async function probeProxy(url, d) {
-  let reason = "";
-  try {
-    const res = await fetch(url, { method: "HEAD", cache: "no-store" });
-    if (res.ok) return;
-    reason = res.headers.get("X-Proxy-Error") || `Preview failed (${res.status}).`;
-  } catch {
-    reason = "The preview service didn't answer.";
-  }
-  if (viewerDrawing === d) showViewerFallback(reason);   // ignore if they moved on
-}
 function closeViewer() {
+  viewSession++;                       // abandons any in-flight fetch/render
+  if (pdfDoc) { pdfDoc.destroy(); pdfDoc = null; }
+  $("pdfPages").innerHTML = "";
+  $("pdfLoading").classList.remove("show");
   $("viewerOverlay").classList.remove("show");
-  $("viewerFrame").src = "about:blank";
   viewerDrawing = null;
 }
+
+/* ---- pdf.js machinery. The browser's own PDF handling inside frames is
+   unusable on iPads (renders top-left, no zoom or scroll), so every device
+   gets the same canvas-based viewer instead. Library loads on first use. ---- */
+let pdfjsReady = null, pdfDoc = null, viewSession = 0, pdfZoom = 1;
+function loadPdfJs() {
+  if (!pdfjsReady) pdfjsReady = new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+    s.onload = () => {
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+        "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+      resolve(window.pdfjsLib);
+    };
+    s.onerror = () => { pdfjsReady = null; reject(new Error("Couldn't load the PDF viewer.")); };
+    document.head.appendChild(s);
+  });
+  return pdfjsReady;
+}
+async function loadPdfInto(d, url) {
+  const sess = ++viewSession;
+  pdfZoom = 1;
+  if (pdfDoc) { pdfDoc.destroy(); pdfDoc = null; }
+  $("pdfLoading").classList.add("show");
+  try {
+    const [lib, res] = await Promise.all([loadPdfJs(), fetch(url, { cache: "no-store" })]);
+    if (sess !== viewSession) return;
+    if (!res.ok) {
+      showViewerFallback(res.headers.get("X-Proxy-Error") || `Preview failed (${res.status}).`);
+      return;
+    }
+    const bytes = await res.arrayBuffer();
+    if (sess !== viewSession) return;
+    const docLoaded = await lib.getDocument({ data: bytes }).promise;
+    if (sess !== viewSession) { docLoaded.destroy(); return; }
+    pdfDoc = docLoaded;
+    await renderPdfPages(sess);
+  } catch (err) {
+    if (sess !== viewSession) return;
+    console.error(err);
+    showViewerFallback("The preview service didn't answer. Check the wifi, or open it in OneDrive.");
+  }
+}
+async function renderPdfPages(sess) {
+  const cont = $("pdfPages");
+  cont.innerHTML = "";
+  const width = Math.max(280, $("pdfScroll").clientWidth - 20);
+  const dpr = Math.min(window.devicePixelRatio || 1, 3);
+  for (let i = 1; i <= pdfDoc.numPages; i++) {
+    if (sess !== viewSession || !pdfDoc) return;
+    const page = await pdfDoc.getPage(i);
+    if (sess !== viewSession) return;
+    const base = page.getViewport({ scale: 1 });
+    const vp = page.getViewport({ scale: (width / base.width) * pdfZoom });
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.floor(vp.width * dpr);
+    canvas.height = Math.floor(vp.height * dpr);
+    canvas.style.width = Math.floor(vp.width) + "px";
+    canvas.style.height = Math.floor(vp.height) + "px";
+    cont.appendChild(canvas);
+    await page.render({
+      canvasContext: canvas.getContext("2d"),
+      viewport: vp,
+      transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : null,
+    }).promise;
+    if (i === 1) $("pdfLoading").classList.remove("show");   // first page up ASAP
+  }
+  $("pdfLoading").classList.remove("show");
+}
+function setZoom(z) {
+  pdfZoom = Math.min(4, Math.max(0.5, z));
+  if (pdfDoc) { viewSession++; renderPdfPages(viewSession); }
+}
+$("vZoomIn").addEventListener("click", () => setZoom(pdfZoom * 1.3));
+$("vZoomOut").addEventListener("click", () => setZoom(pdfZoom / 1.3));
+$("vZoomFit").addEventListener("click", () => setZoom(1));
 $("fbOpenBtn").addEventListener("click", () => {
   if (viewerDrawing) window.open(viewerDrawing.currentLink, "_blank", "noopener");
 });
@@ -1351,15 +1416,14 @@ function renderFlagList() {
 
 /* ================= drawing form ================= */
 const LINK_HINT = 'Right-click the PDF in Explorer → Share → "Anyone with the link" → Can view → Copy.';
-const EMBED_HINT = "In OneDrive: open the file → ⋯ → Embed → copy. Paste the whole snippet or just the URL. Without this, the drawing opens in a OneDrive tab instead.";
 function openDrawingForm(d, presetFolderId) {
   editDrawing = d || null;
   formFolderId = d ? (d.folderId && foldersById.has(d.folderId) ? d.folderId : null)
                    : (presetFolderId || null);
   $("dwgFormTitle").textContent = d ? "Edit drawing" : "Add drawing";
   $("fLink").value   = d ? (d.currentLink || "") : "";
-  $("fEmbed").value  = d ? (d.embedLink || "") : "";
   $("fFilename").value = "";
+  $("filenameStatus").textContent = "";
   $("fNumber").value = d ? (d.drawingNumber || "") : "";
   $("fRev").value    = d ? (d.currentRevision || "") : "";
   $("fName").value   = d ? (d.drawingName || "") : "";
@@ -1395,11 +1459,15 @@ function addDrawingMetaRow(k, v) {
 }
 $("dAddRow").addEventListener("click", () => addDrawingMetaRow("", ""));
 
-/* paste "SL0035 - Bronze Bush" (or the whole filename) → split into the fields */
+/* paste the PDF filename → split into the fields, and show what was decided
+   so a wrong guess is obvious and easily corrected in the fields below */
 function applyFilename(raw) {
   const { number, desc } = splitNumberDesc(raw);
   if (number) $("fNumber").value = number;
   if (desc)   $("fName").value = desc;
+  $("filenameStatus").textContent = number
+    ? `Number ${number}` + (desc ? ` · Description "${desc}"` : " · no description found")
+    : "";
 }
 $("fFilename").addEventListener("input", () => {
   const v = $("fFilename").value;
@@ -1408,22 +1476,9 @@ $("fFilename").addEventListener("input", () => {
 /* typing the combined form straight into the number field works too */
 $("fNumber").addEventListener("blur", () => {
   const v = $("fNumber").value;
-  if (/\s[-–—]\s/.test(v) && !$("fName").value.trim()) applyFilename(v);
-});
-$("fEmbed").addEventListener("input", () => {
-  const v = $("fEmbed").value.trim();
-  const st = $("embedStatus");
-  if (!v) { st.textContent = EMBED_HINT; st.style.color = ""; return; }
-  const url = extractEmbedUrl(v);
-  if (!url) {
-    st.textContent = "Couldn't find a URL in that — paste OneDrive's Embed snippet or the embed URL itself.";
-    st.style.color = "var(--red-bright)";
-  } else if (!/action=embedview|\/embed\.aspx|\/embed\?/i.test(url)) {
-    st.textContent = "That looks like a normal share link, not an embed link — it probably won't preview in the app.";
-    st.style.color = "var(--red-bright)";
-  } else {
-    st.textContent = "Embed link looks right — this drawing will preview in the app.";
-    st.style.color = "";
+  if (!$("fName").value.trim()) {
+    const { number, desc } = splitNumberDesc(v);
+    if (desc) { $("fNumber").value = number; $("fName").value = desc; }
   }
 });
 $("addDrawingBtn").addEventListener("click", () => openDrawingForm(null, null));
@@ -1514,8 +1569,6 @@ $("dwgSaveBtn").addEventListener("click", async () => {
     const v = row.querySelector(".v").value.trim();
     if (k && v) meta[k] = v;
   }
-  const embedLink = extractEmbedUrl($("fEmbed").value);
-
   /* the record id never changes with the number, so renumbering is just an
      edit — but two records must never share a number */
   const clash = findByNumber(number, editDrawing ? editDrawing.id : null);
@@ -1527,7 +1580,7 @@ $("dwgSaveBtn").addEventListener("click", async () => {
     return;
   }
 
-  const payload = { name, number, rev, link, embedLink, meta,
+  const payload = { name, number, rev, link, meta,
                     folderId: formFolderId, categoryId, newCategoryName };
 
   if (editDrawing && cmpRev(rev, editDrawing.currentRevision) < 0) {
@@ -1579,7 +1632,6 @@ async function commitDrawing(p, forced = false) {
       meta:             p.meta,
       currentRevision:  p.rev,
       currentLink:      p.link,
-      embedLink:        p.embedLink || "",
       currentUpdatedAt: serverTimestamp(),
       currentUpdatedBy: who,
     };
