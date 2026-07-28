@@ -28,14 +28,20 @@ add/edit drawings in an overlay, manage folders inline, drag things around.
   view to check how things look; the same button switches back. No second
   login needed.
 - The drawing form is an overlay. Paste the OneDrive link, then paste the PDF
-  filename into the **Paste the PDF filename** field. Names follow
-  `SL0035-BronzeBush` / `SL-Galaxy-2002-LowerArm-A`: the number runs up to the
-  last dash-segment containing a digit with no lowercase letters, the rest is
-  the description with CamelCase split into words → number `SL-Galaxy-2002`,
-  description `Lower Arm A`. The field shows what it decided; correct the two
-  fields below if a name breaks the pattern. (Reading the name out of the link
-  itself only works when the URL contains it; opaque share links don't, hence
-  the paste field.)
+  filename into the **Paste the PDF filename** field. Two naming conventions
+  are hardcoded: **part codes** (2-3 letters + 4 digits + up to 2 letters,
+  always the whole first hyphen-segment — `ST0071D-ClampPlate-Triple-316` →
+  `ST0071D` / "Clamp Plate Triple 316") and **series numbers** ending at the
+  first pure 4-digit segment (`SL-Galaxy-2002-LowerArm-A` → `SL-Galaxy-2002` /
+  "Lower Arm A"). CamelCase descriptions split into words. The field shows
+  what it decided; correct the two fields below if a name breaks the pattern.
+- **History** button in the edit overlay lists every save of that drawing —
+  when, by which account, the revision, and whether it replaced a newer rev
+  or was forced past the warning. Read from the append-only audit trail.
+- **Search** covers folders too (tap a folder hit to jump to its place in the
+  tree), with tight fuzzy matching on words — one typo, swap, or missing
+  letter still hits. Terms containing digits never fuzz: a part number can't
+  quietly match a neighbouring part.
 - **Part info** on each drawing is a free-form key/value list. The suggested
   keys are **Material code** and **Material description** — set those and they
   lead the viewer's header strip in stores order ("SL0325 · 16mm x 6m Solid
