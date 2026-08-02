@@ -48,7 +48,9 @@ function fail(status, message, origin) {
     headers: {
       ...corsHeaders(origin),
       "Content-Type":  "text/plain; charset=utf-8",
-      "X-Proxy-Error": message,
+      /* header values must be Latin-1 — a unicode char in an upstream error
+         message must not turn this useful reply into a crash */
+      "X-Proxy-Error": message.replace(/[^\x20-\x7E]/g, "?"),
       "Cache-Control": "no-store",
     },
   });
@@ -98,6 +100,15 @@ export default {
       return new Response(null, { status: 204, headers: corsHeaders(origin) });
     if (request.method !== "GET" && request.method !== "HEAD")
       return fail(405, "Only GET and HEAD are supported.", origin);
+
+    /* Only the app may use this service. Browser fetches from the app always
+       carry an Origin (or at least a Referer) — requiring one stops drive-by
+       reuse of this URL from burning the free request quota. (A determined
+       curl user can spoof headers; this is a deterrent, not a vault — the
+       files themselves are already "Anyone with the link".) */
+    const src = request.headers.get("Origin") || request.headers.get("Referer") || "";
+    if (!APP_ORIGINS.some(o => src === o || src.startsWith(o + "/")))
+      return fail(403, "This preview service only answers the drawings app.", origin);
 
     const raw = new URL(request.url).searchParams.get("u");
     if (!raw) return fail(400, "Missing ?u= share link.", origin);

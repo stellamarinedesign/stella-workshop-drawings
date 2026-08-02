@@ -108,9 +108,12 @@ on desktops.
 ### What it will and won't fetch
 It only fetches `*.sharepoint.com` and `1drv.ms` URLs, so it can't be used as a
 general-purpose proxy, and it only reaches files you already shared as "Anyone
-with the link" — it grants no access to anything private. If a link needs a
-sign-in, the app shows the OneDrive button with the reason instead of a broken
-frame. Responses are `no-store`, so a revised PDF is never served stale.
+with the link" — it grants no access to anything private. It also refuses
+requests that don't originate from the app's own address (Origin/Referer
+check) so a stranger who finds the worker URL can't burn its free request
+quota; that's a deterrent rather than real security, which continues to come
+from the links themselves. If a link needs a sign-in, the app shows the
+OneDrive button with the reason instead of a broken frame.
 
 If the proxy is unreachable or a link stops working, tapping a drawing shows a
 full-screen **Open in OneDrive** button with the reason, rather than a broken
@@ -121,11 +124,17 @@ sign-in the floor accounts don't have.)
 1. Firebase console → project `stella-workshop-drawings`.
 2. **Enable Auth**: Authentication → Sign-in method → enable **Email/Password**
    (leave "Email link" off).
-3. **Create the two accounts** (Authentication → Users → Add user):
-   - `design@stellamarine.com.au` — full editing rights.
+3. **Create the accounts** (Authentication → Users → Add user):
+   - `design@stellamarine.com.au` and `design2@stellamarine.com.au` — full
+     editing rights (both must ALSO be in the rules above and in
+     `ENGINEERING_EMAILS` in index.html — three places total).
    - a floor account, e.g. `floor@stellamarine.com.au` — one shared login for
      all floor iPads. Read-only by rules; the address doesn't need a real
      mailbox, only the format.
+   With two design accounts editing at once: the app re-checks for duplicate
+   numbers just before writing and warns if the other account saved the same
+   drawing while you had it open, but simultaneous edits are still
+   last-write-wins — coordinate on big restructures.
 4. **Block self-signup**: Authentication → Settings → User actions → untick
    "Enable create (sign-up)". Accounts exist only if you create them.
 5. **Publish the Firestore rules** below (Firestore → Rules). Until you do,
@@ -141,7 +150,8 @@ service cloud.firestore {
     function engineering() {
       // keep in sync with ENGINEERING_EMAILS in index.html
       return signedIn()
-        && request.auth.token.email in ['design@stellamarine.com.au'];
+        && request.auth.token.email in
+             ['design@stellamarine.com.au', 'design2@stellamarine.com.au'];
     }
 
     match /drawings/{id} {
