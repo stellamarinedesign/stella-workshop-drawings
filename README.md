@@ -41,7 +41,17 @@ add/edit drawings in an overlay, manage folders inline, drag things around.
 - **Search** covers folders too (tap a folder hit to jump to its place in the
   tree), with tight fuzzy matching on words — one typo, swap, or missing
   letter still hits. Terms containing digits never fuzz: a part number can't
-  quietly match a neighbouring part.
+  quietly match a neighbouring part. Part-info values are searchable as well,
+  so a material code or "316" finds every drawing using that material.
+- **Print and download** (engineering only — the floor has no printer): a ⎙
+  button on each drawing row prints directly; the viewer has ⎙ Print and
+  ⬇ PDF buttons. The **⎙ All** button on a folder builds one combined PDF of
+  the drawings **directly in that folder** (subfolders deliberately excluded;
+  hidden drawings excluded; the button doesn't appear when a folder has no
+  drawings of its own). It opens in the normal scrollable viewer with Print
+  and Download — multi-page drawings keep all their pages. Combining happens
+  in the browser with pdf-lib via the proxy; OneDrive is only ever fetched
+  per-file.
 - **Part info** on each drawing is a free-form key/value list. The suggested
   keys are **Material code** and **Material description** — set those and they
   lead the viewer's header strip in stores order ("SL0325 · 16mm x 6m Solid

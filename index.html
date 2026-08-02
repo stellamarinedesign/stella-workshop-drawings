@@ -263,6 +263,11 @@
   .d-side button.flagged { color:var(--red-bright); }
   .d-side .edit-btn { display:none; font-size:15px; }
   body.eng .d-side .edit-btn { display:block; }
+  /* printing is engineering-only — the workshop has no printer */
+  .d-side .print-btn { display:none; font-size:16px; }
+  body.eng .d-side .print-btn { display:block; }
+  #viewerBar .eng-only { display:none; }
+  body.eng #viewerBar .eng-only { display:inline-block; }
 
   #rootDrop {
     display:none;
@@ -488,7 +493,7 @@
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#b0b0ab" stroke-width="2.5" stroke-linecap="round">
         <circle cx="10.5" cy="10.5" r="7"/><line x1="16" y1="16" x2="21" y2="21"/>
       </svg>
-      <input id="searchInput" type="search" placeholder="Search drawing number or name…"
+      <input id="searchInput" type="search" placeholder="Search number, name or material…"
              autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
       <button id="clearBtn" aria-label="Clear search">×</button>
     </div>
@@ -532,6 +537,8 @@
     <button class="mini" id="vZoomOut" aria-label="Zoom out">−</button>
     <button class="mini" id="vZoomIn" aria-label="Zoom in">＋</button>
     <button class="mini" id="vZoomFit" aria-label="Fit to width">Fit</button>
+    <button class="mini eng-only" id="vPrintBtn">⎙ Print</button>
+    <button class="mini eng-only" id="vDownloadBtn">⬇ PDF</button>
     <button class="mini" id="vFlagBtn">⚑ Report</button>
     <button class="mini" id="vOpenBtn">Open in OneDrive ↗</button>
     <button class="mini" id="vCloseBtn">✕ Close</button>
@@ -541,9 +548,11 @@
     <div id="pdfScroll"><div id="pdfPages"></div></div>
     <div id="pdfLoading"><div class="spinner"></div>Fetching the drawing…</div>
     <div id="viewerFallback">
-      <strong>Open this drawing in OneDrive</strong>
-      <p>OneDrive won't show this one inside the app. Tap below — it opens in a new tab, then just close that tab to come back.</p>
-      <button class="big" id="fbOpenBtn">Open in OneDrive ↗</button>
+      <span id="fbSingle" style="display:contents;">
+        <strong>Open this drawing in OneDrive</strong>
+        <p>OneDrive won't show this one inside the app. Tap below — it opens in a new tab, then just close that tab to come back.</p>
+        <button class="big" id="fbOpenBtn">Open in OneDrive ↗</button>
+      </span>
       <span id="fbReason"></span>
       <span id="fbEngHint">If this keeps happening, check the file is still shared as "Anyone with the link".</span>
     </div>
@@ -717,7 +726,7 @@ const ENGINEERING_EMAILS = ["design@stellamarine.com.au", "design2@stellamarine.
    drawings open in OneDrive instead. */
 const PROXY_BASE = "https://stella-drawings-proxy.design-fc7.workers.dev";
 
-const APP_VERSION = "3.8";
+const APP_VERSION = "3.9";
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut }
@@ -753,6 +762,8 @@ let editFolderId = null;        // folder in the folder form (null = adding)
 let lastVersionCheck = 0;
 let dwgBusy = false;            // a drawing-form write is in flight (blocks double-taps)
 let viewerFetchCtrl = null;     // abort handle for the viewer's PDF fetch
+let viewerBytes = null;         // raw bytes of what the viewer is showing (print/download)
+let viewerFilename = "drawing.pdf";
 
 /* expand-state persists across app restarts on the iPads */
 try { expanded = new Set(JSON.parse(localStorage.getItem("dwgOpen") || "[]")); } catch {}
@@ -1150,6 +1161,10 @@ function folderRow(f, depth, count) {
   const open = expanded.has(f.id);
   const meta = f.meta || {};
   const metaText = metaEntries(meta).map(([k,v]) => `${k}: ${v}`).join(" · ");
+  // combined view/print works on the folder's OWN drawings, never subfolders —
+  // no button at all when there are none (also prevents an accidental
+  // print-everything from a parent that only holds subfolders)
+  const ownActive = (drawingsIn.get(f.id) || []).filter(d => !d.hidden).length;
   const row = document.createElement("div");
   row.className = "f-row";
   row.style.marginLeft = (depth * 22) + "px";
@@ -1163,6 +1178,7 @@ function folderRow(f, depth, count) {
       <button class="mini" data-act="adddwg" title="Add drawing here">＋ Dwg</button>
       <button class="mini" data-act="addsub" title="Add subfolder">＋ Sub</button>
       <button class="mini" data-act="edit" title="Edit folder">✎</button>
+      ${ownActive ? `<button class="mini" data-act="viewall" title="View, print or download the ${ownActive} drawing${ownActive === 1 ? "" : "s"} in this folder as one PDF (subfolders not included)">⎙ All</button>` : ""}
       <button class="mini" data-act="up" title="Move up">↑</button>
       <button class="mini" data-act="down" title="Move down">↓</button>
     </span>`;
@@ -1178,6 +1194,8 @@ function folderRow(f, depth, count) {
     row.querySelector('[data-act="adddwg"]').onclick = () => openDrawingForm(null, f.id);
     row.querySelector('[data-act="addsub"]').onclick = () => openFolderForm(null, f.id);
     row.querySelector('[data-act="edit"]').onclick   = () => openFolderForm(f.id);
+    const va = row.querySelector('[data-act="viewall"]');
+    if (va) va.onclick = () => openCombinedViewer(f);
     row.querySelector('[data-act="up"]').onclick     = () => reorderFolder(f, -1);
     row.querySelector('[data-act="down"]').onclick   = () => reorderFolder(f, +1);
 
@@ -1225,6 +1243,7 @@ function drawingRow(d, depth, showPath) {
     </div>
     <div class="d-side">
       <button class="edit-btn" aria-label="Edit drawing" title="Edit">✎</button>
+      <button class="print-btn" aria-label="Print drawing" title="Print">⎙</button>
       <button class="flag-b${flagged ? " flagged" : ""}" aria-label="Report a problem with this drawing" title="Report a problem">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="${flagged ? "currentColor" : "none"}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M4 21V4c2.5-1.6 5-1.6 8 0s5.5 1.6 8 0v11c-2.5 1.6-5 1.6-8 0s-5.5-1.6-8 0"/>
@@ -1235,6 +1254,7 @@ function drawingRow(d, depth, showPath) {
   row.querySelector(".flag-b").onclick = () => openFlagSheet(d);
   if (isEng) {
     row.querySelector(".edit-btn").onclick = () => openDrawingForm(d);
+    row.querySelector(".print-btn").onclick = e => printDrawingRow(d, e.currentTarget);
     row.querySelector(".d-main").addEventListener("dragstart", e => {
       e.dataTransfer.setData("text/x-drawing", d.id);
       e.dataTransfer.effectAllowed = "move";
@@ -1328,17 +1348,21 @@ function renderSearch() {
     return words.every(w => fuzzyWordMatch(w, text, text.split(" ")));
   });
 
+  // part info values are searchable too — "316" or a stores code finds every
+  // drawing using that material (digit terms stay exact-match, as always)
+  const metaText = d => norm(Object.values(d.meta || {}).join(" "));
   let list = drawings.filter(drawingVisible).filter(d => {
-    const text = norm((d.drawingName || "") + " " + (d.drawingNumber || ""));
+    const text = norm((d.drawingName || "") + " " + (d.drawingNumber || "")) + " " + metaText(d);
     return words.every(w => fuzzyWordMatch(w, text, text.split(" ")));
   });
   const score = d => {
-    const num = norm(d.drawingNumber), name = norm(d.drawingName);
+    const num = norm(d.drawingNumber), name = norm(d.drawingName), mat = metaText(d);
     let s = 0;
     for (const w of words) {
       if (num.includes(w)) s += 2;
       if (num.startsWith(w)) s += 2;
       if (name.includes(w)) s += 1;       // exact hits rank above fuzzy-only
+      if (mat.includes(w)) s += 1;
     }
     return -s;
   };
@@ -1369,8 +1393,15 @@ function renderSearch() {
 /* ================= PDF viewer ================= */
 function openViewer(d) {
   viewerDrawing = d;
+  viewerBytes = null;
+  viewerFilename = (d.drawingNumber || "drawing").replace(/[\\/:*?"<>|]+/g, "-") + ".pdf";
   $("vRev").textContent = "REV " + (d.currentRevision || "–");
   $("vTitle").textContent = [d.drawingNumber, d.drawingName].filter(Boolean).join(" — ");
+  $("vFlagBtn").style.display = "";
+  $("vOpenBtn").style.display = "";
+  $("vPrintBtn").disabled = true;
+  $("vDownloadBtn").disabled = true;
+  setPdfLoadingText("Fetching the drawing…");
 
   const info = $("viewerInfo");
   const line = metaLine(d.meta);
@@ -1387,17 +1418,24 @@ function openViewer(d) {
   if (proxied) loadPdfInto(d, proxied);
   else showViewerFallback("");
 }
+function setPdfLoadingText(t) {
+  const n = $("pdfLoading");
+  if (n.childNodes[1]) n.childNodes[1].textContent = t;
+}
 function showViewerFallback(reason) {
   viewSession++;
   $("pdfLoading").classList.remove("show");
   $("pdfPages").innerHTML = "";
   $("fbReason").textContent = reason || "";
+  // the OneDrive escape hatch only makes sense for a single drawing
+  $("fbSingle").style.display = viewerDrawing ? "contents" : "none";
   $("viewerFallback").classList.add("show");
 }
 function closeViewer() {
   viewSession++;                       // abandons any in-flight fetch/render
   if (viewerFetchCtrl) { viewerFetchCtrl.abort(); viewerFetchCtrl = null; }
   if (pdfDoc) { pdfDoc.destroy(); pdfDoc = null; }
+  viewerBytes = null;
   $("pdfPages").innerHTML = "";
   $("pdfLoading").classList.remove("show");
   $("viewerOverlay").classList.remove("show");
@@ -1440,6 +1478,9 @@ async function loadPdfInto(d, url) {
     }
     const bytes = await res.arrayBuffer();
     if (sess !== viewSession) return;
+    viewerBytes = bytes.slice(0);        // keep a copy — pdf.js takes the original
+    $("vPrintBtn").disabled = false;
+    $("vDownloadBtn").disabled = false;
     const docLoaded = await lib.getDocument({ data: bytes }).promise;
     if (sess !== viewSession) { docLoaded.destroy(); return; }
     pdfDoc = docLoaded;
@@ -1573,6 +1614,161 @@ $("vZoomFit").addEventListener("click", () => setZoom(1));
             e.clientX - r.left, e.clientY - r.top);
   }, { passive: false });
 }
+/* ---- print / download / combine (engineering only — CSS hides the buttons
+   on the floor, and the workshop has no printer anyway) ---- */
+let pdfLibReady = null;
+function loadPdfLib() {
+  if (!pdfLibReady) pdfLibReady = new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js";
+    s.onload = () => resolve(window.PDFLib);
+    s.onerror = () => { pdfLibReady = null; reject(new Error("Couldn't load the PDF combiner.")); };
+    document.head.appendChild(s);
+  });
+  return pdfLibReady;
+}
+function fetchDrawingBytes(d, signal) {
+  const url = proxySrc(d);
+  if (!url) return Promise.reject(new Error("No usable link on this drawing."));
+  return fetch(url, { cache: "no-store", signal }).then(res => {
+    if (!res.ok) throw new Error(res.headers.get("X-Proxy-Error") || ("HTTP " + res.status));
+    return res.arrayBuffer();
+  });
+}
+/* print via a hidden same-origin blob iframe — the browser's own PDF print
+   path, no popups. Falls back to opening a tab if the browser refuses. */
+let printFrame = null;
+function printPdfBytes(bytes) {
+  const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+  if (printFrame) printFrame.remove();
+  const f = document.createElement("iframe");
+  f.style.cssText = "position:fixed; right:0; bottom:0; width:2px; height:2px; opacity:0; pointer-events:none;";
+  f.src = url;
+  f.onload = () => {
+    try { f.contentWindow.focus(); f.contentWindow.print(); }
+    catch { window.open(url, "_blank"); }
+  };
+  printFrame = f;
+  document.body.appendChild(f);
+  setTimeout(() => URL.revokeObjectURL(url), 120000);
+}
+function downloadPdfBytes(bytes, filename) {
+  const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+}
+async function printDrawingRow(d, btn) {
+  btn.disabled = true;
+  try {
+    printPdfBytes(await fetchDrawingBytes(d));
+  } catch (err) {
+    alert("Couldn't fetch the PDF to print — " + (err.message || err));
+  }
+  btn.disabled = false;
+}
+/* fetch a folder's own drawings a few at a time, reporting progress */
+async function fetchAllBytes(list, onProgress, signal) {
+  const results = new Array(list.length);
+  const failures = [];
+  let next = 0, done = 0;
+  const workers = Array.from({ length: Math.min(3, list.length) }, async () => {
+    while (next < list.length) {
+      const i = next++;
+      try { results[i] = await fetchDrawingBytes(list[i], signal); }
+      catch (e) {
+        if (e && e.name === "AbortError") throw e;
+        failures.push(list[i].drawingNumber || list[i].id);
+        results[i] = null;
+      }
+      onProgress(++done, list.length);
+    }
+  });
+  await Promise.all(workers);
+  return { results, failures };
+}
+
+/* one scrollable PDF of every drawing DIRECTLY in the folder (subfolders are
+   deliberately not included), printable and downloadable as a single file */
+async function openCombinedViewer(f) {
+  const list = (drawingsIn.get(f.id) || []).filter(d => !d.hidden);
+  if (!list.length) return;
+  viewerDrawing = null;
+  viewerBytes = null;
+  viewerFilename = (f.name || "folder").replace(/[\\/:*?"<>|]+/g, "-") + " - drawings.pdf";
+  $("vRev").textContent = "ALL";
+  $("vTitle").textContent = (f.name || "?") + " — " + list.length + " drawing" + (list.length === 1 ? "" : "s") + " combined";
+  $("vFlagBtn").style.display = "none";
+  $("vOpenBtn").style.display = "none";
+  $("vPrintBtn").disabled = true;
+  $("vDownloadBtn").disabled = true;
+  $("viewerInfo").classList.remove("show");
+  $("fbReason").textContent = "";
+  $("viewerFallback").classList.remove("show");
+  $("pdfPages").innerHTML = "";
+  $("pdfScroll").scrollTo(0, 0);
+  $("viewerOverlay").classList.add("show");
+
+  const sess = ++viewSession;
+  pdfZoom = 1;
+  if (pdfDoc) { pdfDoc.destroy(); pdfDoc = null; }
+  if (viewerFetchCtrl) viewerFetchCtrl.abort();
+  const ctrl = new AbortController();
+  viewerFetchCtrl = ctrl;
+  $("pdfLoading").classList.add("show");
+  setPdfLoadingText("Fetching 0 of " + list.length + "…");
+  try {
+    const [merge] = await Promise.all([loadPdfLib(), loadPdfJs()]);
+    const { results, failures } = await fetchAllBytes(list,
+      (n, total) => { if (sess === viewSession) setPdfLoadingText(`Fetching ${n} of ${total}…`); },
+      ctrl.signal);
+    if (sess !== viewSession) return;
+    setPdfLoadingText("Combining…");
+    const out = await merge.PDFDocument.create();
+    for (let i = 0; i < list.length; i++) {
+      if (!results[i]) continue;
+      try {
+        const src = await merge.PDFDocument.load(results[i], { ignoreEncryption: true });
+        for (const pg of await out.copyPages(src, src.getPageIndices())) out.addPage(pg);
+      } catch {
+        failures.push(list[i].drawingNumber || list[i].id);
+      }
+      if (sess !== viewSession) return;
+    }
+    if (!out.getPageCount()) {
+      showViewerFallback("None of the drawings could be fetched — check the connection and try again.");
+      return;
+    }
+    const mergedBytes = await out.save();
+    if (sess !== viewSession) return;
+    viewerBytes = mergedBytes;
+    $("vPrintBtn").disabled = false;
+    $("vDownloadBtn").disabled = false;
+    const jsLib = await loadPdfJs();
+    const docLoaded = await jsLib.getDocument({ data: mergedBytes.slice() }).promise;
+    if (sess !== viewSession) { docLoaded.destroy(); return; }
+    pdfDoc = docLoaded;
+    if (failures.length) {
+      const info = $("viewerInfo");
+      info.innerHTML = `<b>${failures.length}</b> couldn't be included: ${escapeHtml(failures.join(", "))}`;
+      info.classList.add("show");
+    }
+    await renderPdfPages(sess);
+  } catch (err) {
+    if (sess !== viewSession) return;
+    console.error(err);
+    showViewerFallback(err && err.name === "AbortError"
+      ? "Stopped."
+      : "Couldn't build the combined PDF — " + (err.message || err));
+  } finally {
+    if (viewerFetchCtrl === ctrl) viewerFetchCtrl = null;
+  }
+}
+
+$("vPrintBtn").addEventListener("click", () => { if (viewerBytes) printPdfBytes(viewerBytes); });
+$("vDownloadBtn").addEventListener("click", () => { if (viewerBytes) downloadPdfBytes(viewerBytes, viewerFilename); });
+
 $("fbOpenBtn").addEventListener("click", () => {
   if (viewerDrawing) window.open(viewerDrawing.currentLink, "_blank", "noopener");
 });
