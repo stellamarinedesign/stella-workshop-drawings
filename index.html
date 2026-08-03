@@ -192,6 +192,10 @@
     color:var(--red-bright); font-size:11.5px; font-weight:700; letter-spacing:.06em; flex-shrink:0;
     border:1px solid var(--red-deep); border-radius:6px; padding:1px 6px;
   }
+  .f-abbrev {
+    color:var(--text-dim); font-size:11.5px; font-weight:700; letter-spacing:.06em; flex-shrink:0;
+    border:1px solid var(--line); border-radius:6px; padding:1px 6px;
+  }
   .f-toggle {
     flex-shrink:0; width:38px; height:38px;
     background:none; border:none; color:var(--text-dim);
@@ -653,6 +657,11 @@
       <div class="hint">Used to name combined PDFs from anywhere under this folder — e.g. prefix SL on Stella Lifters makes the Galaxy folder's combined file "_SL-Galaxy-2999-Combined.pdf".</div>
     </div>
     <div class="o-field">
+      <label for="feAbbrev">Abbreviation <span style="text-transform:none; letter-spacing:0;">(optional)</span></label>
+      <input type="text" id="feAbbrev" maxlength="14" placeholder="e.g. P420" autocomplete="off" style="width:180px;">
+      <div class="hint">Replaces the folder name in combined-PDF filenames — "Prestige 420" abbreviated P420 downloads as "_SL-P420-2999-Combined.pdf".</div>
+    </div>
+    <div class="o-field">
       <label>Project info <span style="text-transform:none; letter-spacing:0;">(shown on the floor)</span></label>
       <div id="feMetaRows"></div>
       <button class="mini" id="feAddRow">＋ Add row</button>
@@ -709,9 +718,11 @@
 <!-- ============ FLAG SHEET (floor report) ============ -->
 <div id="sheetOverlay"></div>
 <div id="flagSheet" role="dialog" aria-modal="true">
+  <h3 id="fsName"></h3>
+  <div class="fs-num" id="fsNum"></div>
+  <button class="ghost" id="printReqBtn" style="width:100%; margin-bottom:18px;">🖨 Request a printed copy</button>
   <div id="flagForm">
-    <h3 id="fsName"></h3>
-    <div class="fs-num" id="fsNum"></div>
+    <div class="hint" style="margin-bottom:9px;">Or report a problem:</div>
     <div class="reason-chips" id="reasonChips"></div>
     <input id="flagNote" type="text" placeholder="Anything else? (optional)" autocomplete="off">
     <div class="sheet-actions">
@@ -742,7 +753,7 @@ const ENGINEERING_EMAILS = ["design@stellamarine.com.au", "design2@stellamarine.
    drawings open in OneDrive instead. */
 const PROXY_BASE = "https://stella-drawings-proxy.design-fc7.workers.dev";
 
-const APP_VERSION = "3.10";
+const APP_VERSION = "3.11";
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut }
@@ -763,8 +774,9 @@ let childrenOf  = new Map();    // parentId ("root") -> sorted [folder]
 let drawingsIn  = new Map();    // folderId ("root" = unfiled) -> sorted [drawing]
 let hiddenFolderSet = new Set();// folders hidden from the floor, incl. everything under one
 let categories  = [];           // {id, name, order}
-let openFlags   = [];           // unresolved flags
-let flaggedIds  = new Set();
+let openFlags   = [];           // unresolved flags (problems AND print requests)
+let flaggedIds  = new Set();    // drawings with an open PROBLEM report
+let printReqIds = new Set();    // drawings with an open print request
 let isEngAccount = false;       // signed in as a design/engineering account
 let previewFloor = false;       // design account temporarily viewing as the floor
 let isEng = false;              // effective editing mode = isEngAccount && !previewFloor
@@ -781,6 +793,7 @@ let dwgBusy = false;            // a drawing-form write is in flight (blocks dou
 let viewerFetchCtrl = null;     // abort handle for the viewer's PDF fetch
 let viewerBytes = null;         // raw bytes of what the viewer is showing (print/download)
 let viewerFilename = "drawing.pdf";
+let formSourceFilename = "";    // the exact filename pasted into the form, kept for downloads
 
 /* expand-state persists across app restarts on the iPads */
 try { expanded = new Set(JSON.parse(localStorage.getItem("dwgOpen") || "[]")); } catch {}
@@ -889,7 +902,8 @@ function subscribeData() {
   unsubs.push(onSnapshot(query(collection(db, "flags"), where("resolved", "==", false)), snap => {
     openFlags = snap.docs.map(f => ({ id: f.id, ...f.data() }));
     openFlags.sort((a,b) => tsMillis(a.flaggedAt) - tsMillis(b.flaggedAt));
-    flaggedIds = new Set(openFlags.map(f => f.drawingId));
+    flaggedIds  = new Set(openFlags.filter(f => (f.type || "problem") !== "print").map(f => f.drawingId));
+    printReqIds = new Set(openFlags.filter(f => f.type === "print").map(f => f.drawingId));
     renderFlagsBadge();
     if ($("flagsOverlay").classList.contains("show")) renderFlagList();
     refreshUI();
@@ -1204,6 +1218,7 @@ function folderRow(f, depth, count) {
     <button class="f-toggle${hasKids ? "" : " leaf"}" aria-label="${open ? "Collapse" : "Expand"}">${open ? "▾" : "▸"}</button>
     <span class="f-name" ${isEng ? 'draggable="true"' : ""}>${escapeHtml(f.name || "?")}</span>
     ${!f.parentId && f.prefix ? `<span class="f-prefix">${escapeHtml(f.prefix)}</span>` : ""}
+    ${f.abbrev && isEng ? `<span class="f-abbrev">${escapeHtml(f.abbrev)}</span>` : ""}
     ${effHidden ? `<span class="f-hiddenchip">${f.hidden ? "hidden from floor" : "in hidden folder"}</span>` : ""}
     <span class="f-count">${count || ""}</span>
     ${metaText ? `<span class="f-info" title="${escapeHtml(metaText)}">${escapeHtml(metaText)}</span>` : ""}
@@ -1425,10 +1440,19 @@ function renderSearch() {
 }
 
 /* ================= PDF viewer ================= */
+/* download name: the exact filename that was pasted at add time when we have
+   it; otherwise rebuilt as Number-DescriptionWithoutSpaces (internal hyphens
+   from the original can't be reconstructed — that's why we keep the paste) */
+function drawingFilename(d) {
+  const src = (d.sourceFilename || "").trim();
+  const name = src || [d.drawingNumber, (d.drawingName || "").replace(/\s+/g, "")]
+    .filter(Boolean).join("-");
+  return (name || "drawing").replace(/[\\/:*?"<>|]+/g, "-") + ".pdf";
+}
 function openViewer(d) {
   viewerDrawing = d;
   viewerBytes = null;
-  viewerFilename = (d.drawingNumber || "drawing").replace(/[\\/:*?"<>|]+/g, "-") + ".pdf";
+  viewerFilename = drawingFilename(d);
   $("vRev").textContent = "REV " + (d.currentRevision || "–");
   $("vTitle").textContent = [d.drawingNumber, d.drawingName].filter(Boolean).join(" — ");
   $("vFlagBtn").style.display = "";
@@ -1554,14 +1578,18 @@ async function renderPdfPages(sess, anchor) {
     scroller.scrollLeft = Math.max(0, padX + (prevLeft + anchor.ax - padX) * anchor.ratio - anchor.ax);
     scroller.scrollTop  = Math.max(0, padY + (prevTop  + anchor.ay - padY) * anchor.ratio - anchor.ay);
   }
-  const width = Math.max(280, $("pdfScroll").clientWidth - 20);
+  // zoom 1 = the WHOLE page visible — fit both directions, so the bottom of a
+  // sheet is never cut off on open; zooming in grows from there
+  const availW = Math.max(280, scroller.clientWidth - 20);
+  const availH = Math.max(280, scroller.clientHeight - 46);
   const dprBase = Math.min(window.devicePixelRatio || 1, 3);
   for (let i = 1; i <= pdfDoc.numPages; i++) {
     if (sess !== viewSession || !pdfDoc) return;
     const page = await pdfDoc.getPage(i);
     if (sess !== viewSession) return;
     const base = page.getViewport({ scale: 1 });
-    const vp = page.getViewport({ scale: (width / base.width) * pdfZoom });
+    const fit = Math.min(availW / base.width, availH / base.height);
+    const vp = page.getViewport({ scale: fit * pdfZoom });
     // cap the backing store so deep zoom on big sheets can't blow Safari's canvas memory
     const dpr = Math.min(dprBase, 4096 / vp.width, 4096 / vp.height);
     const canvas = document.createElement("canvas");
@@ -1582,7 +1610,7 @@ async function renderPdfPages(sess, anchor) {
 }
 /* zoom anchored on (ax, ay) in viewport coords — defaults to the centre */
 function setZoom(z, ax, ay) {
-  const newZoom = Math.min(4, Math.max(0.5, z));
+  const newZoom = Math.min(6, Math.max(0.5, z));
   if (!pdfDoc || newZoom === pdfZoom) return;
   const scroller = $("pdfScroll");
   const ratio = newZoom / pdfZoom;
@@ -1626,7 +1654,7 @@ $("vZoomFit").addEventListener("click", () => setZoom(1));
     e.preventDefault();
     const [a, b] = e.touches;
     const d = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
-    pinch.k = Math.min(4 / pdfZoom, Math.max(0.5 / pdfZoom, d / pinch.dist));
+    pinch.k = Math.min(6 / pdfZoom, Math.max(0.5 / pdfZoom, d / pinch.dist));
     pagesEl.style.transform = "scale(" + pinch.k + ")";
   }, { passive: false });
   const endPinch = () => {
@@ -1737,7 +1765,10 @@ function topAncestor(folderId) {
 function combinedFilename(f) {
   const top = topAncestor(f.id);
   const prefix = top && top.prefix ? String(top.prefix).trim() : "";
-  const cleanName = (f.name || "folder").replace(/\s+/g, "").replace(/[\\/:*?"<>|.]+/g, "-");
+  // the folder's abbreviation wins over its name: "Prestige 420" abbreviated
+  // P420 under SL → _SL-P420-2999-Combined.pdf
+  const base = (f.abbrev && f.abbrev.trim()) || f.name || "folder";
+  const cleanName = base.replace(/\s+/g, "").replace(/[\\/:*?"<>|.]+/g, "-");
   return "_" + [prefix, cleanName, "2999", "Combined"].filter(Boolean).join("-") + ".pdf";
 }
 
@@ -1835,6 +1866,15 @@ function openFlagSheet(d) {
   $("fsNum").textContent  = d.drawingName || "";
   $("flagNote").value = "";
   $("flagDone").style.display = "none";
+  const pr = $("printReqBtn");
+  pr.style.display = "";
+  if (printReqIds.has(d.id)) {
+    pr.disabled = true;
+    pr.textContent = "🖨 Printed copy already requested";
+  } else {
+    pr.disabled = false;
+    pr.textContent = "🖨 Request a printed copy";
+  }
   if (flaggedIds.has(d.id)) {
     $("flagForm").style.display = "none";
     $("flagDone").style.display = "block";
@@ -1865,6 +1905,29 @@ function closeFlagSheet() {
 $("sheetOverlay").addEventListener("click", closeFlagSheet);
 $("flagCancel").addEventListener("click", closeFlagSheet);
 $("flagDone").addEventListener("click", closeFlagSheet);
+/* a hard-copy request — one tap, not an error report */
+$("printReqBtn").addEventListener("click", async () => {
+  if (!flagTarget || printReqIds.has(flagTarget.id)) return;
+  const btn = $("printReqBtn");
+  btn.disabled = true;
+  try {
+    await addDoc(collection(db, "flags"), {
+      drawingId:     flagTarget.id,
+      drawingName:   flagTarget.drawingName || "",
+      drawingNumber: flagTarget.drawingNumber || "",
+      reason:        "Printed copy requested",
+      type:          "print",
+      flaggedAt:     serverTimestamp(),
+      resolved:      false,
+    });
+    printReqIds.add(flagTarget.id);
+    btn.textContent = "🖨 Requested — engineering will print it";
+  } catch (err) {
+    btn.textContent = "Couldn't send — check the wifi and try again";
+    btn.disabled = false;
+    console.error(err);
+  }
+});
 $("flagSend").addEventListener("click", async () => {
   if (!flagTarget) return;
   const note = $("flagNote").value.trim();
@@ -1876,6 +1939,7 @@ $("flagSend").addEventListener("click", async () => {
       drawingName:   flagTarget.drawingName || "",
       drawingNumber: flagTarget.drawingNumber || "",
       reason:        reason,
+      type:          "problem",
       flaggedAt:     serverTimestamp(),
       resolved:      false,
     });
@@ -1896,7 +1960,10 @@ $("flagSend").addEventListener("click", async () => {
 function renderFlagsBadge() {
   const b = $("flagsBadge");
   b.classList.toggle("show", isEng && openFlags.length > 0);
-  b.textContent = "⚑ " + openFlags.length + " flagged";
+  const nPrint = openFlags.filter(f => f.type === "print").length;
+  const nProb  = openFlags.length - nPrint;
+  b.textContent = [nProb ? "⚑ " + nProb : "", nPrint ? "🖨 " + nPrint : ""]
+    .filter(Boolean).join("  ");
 }
 $("flagsBadge").addEventListener("click", () => {
   renderFlagList();
@@ -1911,28 +1978,38 @@ function renderFlagList() {
     const when = fl.flaggedAt && fl.flaggedAt.toDate
       ? fl.flaggedAt.toDate().toLocaleString("en-AU", { day:"numeric", month:"short", hour:"numeric", minute:"2-digit" })
       : "";
+    const isPrint = fl.type === "print";
     const row = document.createElement("div");
     row.className = "list-row";
     row.innerHTML = `
       <div class="grow">
         <strong>${escapeHtml(fl.drawingNumber || fl.drawingId)}</strong>
         ${fl.drawingName ? " — " + escapeHtml(fl.drawingName) : ""}<br>
-        <span style="color:var(--red-bright);">${escapeHtml(fl.reason || "No reason given")}</span>
+        <span style="color:${isPrint ? "var(--white)" : "var(--red-bright)"};">${isPrint ? "🖨 Printed copy requested" : escapeHtml(fl.reason || "No reason given")}</span>
         <span style="color:var(--text-dim); font-size:12.5px;"> · ${escapeHtml(when)}</span>
       </div>
-      <button class="mini" data-act="edit">Edit drawing</button>
-      <button class="mini" data-act="resolve">Mark resolved</button>`;
-    row.querySelector('[data-act="edit"]').onclick = () => {
-      const d = drawings.find(x => x.id === fl.drawingId);
-      if (d) { $("flagsOverlay").classList.remove("show"); openDrawingForm(d); }
-      else alert("That drawing record no longer exists (it may have been re-numbered).");
-    };
+      ${isPrint ? `<button class="mini" data-act="print">⎙ Print</button>` : `<button class="mini" data-act="edit">Edit drawing</button>`}
+      <button class="mini" data-act="resolve">${isPrint ? "Done" : "Mark resolved"}</button>`;
+    if (isPrint) {
+      row.querySelector('[data-act="print"]').onclick = e => {
+        const d = drawings.find(x => x.id === fl.drawingId);
+        if (d) printDrawingRow(d, e.currentTarget);
+        else alert("That drawing record no longer exists.");
+      };
+    } else {
+      row.querySelector('[data-act="edit"]').onclick = () => {
+        const d = drawings.find(x => x.id === fl.drawingId);
+        if (d) { $("flagsOverlay").classList.remove("show"); openDrawingForm(d); }
+        else alert("That drawing record no longer exists (it may have been re-numbered).");
+      };
+    }
     row.querySelector('[data-act="resolve"]').onclick = async e => {
       e.target.disabled = true;
       try {
         await updateDoc(doc(db, "flags", fl.id), { resolved: true, resolvedAt: serverTimestamp() });
         openFlags = openFlags.filter(x => x.id !== fl.id);
-        flaggedIds = new Set(openFlags.map(f => f.drawingId));
+        flaggedIds  = new Set(openFlags.filter(f => (f.type || "problem") !== "print").map(f => f.drawingId));
+        printReqIds = new Set(openFlags.filter(f => f.type === "print").map(f => f.drawingId));
         renderFlagsBadge(); renderFlagList(); render();
       } catch (err) {
         e.target.disabled = false;
@@ -1956,6 +2033,7 @@ function openDrawingForm(d, presetFolderId) {
   $("fNumber").value = d ? (d.drawingNumber || "") : "";
   $("fRev").value    = d ? (d.currentRevision || "") : "";
   $("fName").value   = d ? (d.drawingName || "") : "";
+  formSourceFilename = d ? (d.sourceFilename || "") : "";
   $("dMetaRows").innerHTML = "";
   const dmeta = (d && d.meta) || {};
   const dkeys = Object.keys(dmeta);
@@ -2018,6 +2096,7 @@ $("dAddRow").addEventListener("click", () => addDrawingMetaRow("", ""));
    so a wrong guess is obvious and easily corrected in the fields below */
 function applyFilename(raw) {
   const { number, desc } = splitNumberDesc(raw);
+  formSourceFilename = raw.trim().replace(/\.pdf$/i, "");   // kept verbatim for downloads
   if (number) $("fNumber").value = number;
   if (desc)   $("fName").value = desc;
   $("filenameStatus").textContent = number
@@ -2033,7 +2112,11 @@ $("fNumber").addEventListener("blur", () => {
   const v = $("fNumber").value;
   if (!$("fName").value.trim()) {
     const { number, desc } = splitNumberDesc(v);
-    if (desc) { $("fNumber").value = number; $("fName").value = desc; }
+    if (desc) {
+      formSourceFilename = v.trim().replace(/\.pdf$/i, "");
+      $("fNumber").value = number;
+      $("fName").value = desc;
+    }
   }
 });
 $("addDrawingBtn").addEventListener("click", () => openDrawingForm(null, null));
@@ -2203,7 +2286,12 @@ $("dwgSaveBtn").addEventListener("click", async () => {
     return;
   }
 
-  const payload = { name, number, rev, link, meta,
+  /* keep the pasted filename only while it still parses to this number —
+     if the number was edited afterwards, the download name is reconstructed */
+  const sourceFilename =
+    formSourceFilename && splitNumberDesc(formSourceFilename).number === number
+      ? formSourceFilename : "";
+  const payload = { name, number, rev, link, meta, sourceFilename,
                     folderId: formFolderId, categoryId, newCategoryName };
 
   if (editDrawing && cmpRev(rev, editDrawing.currentRevision) < 0) {
@@ -2307,6 +2395,7 @@ async function commitDrawing(p, forced = false) {
       folderPath:       pathOf(p.folderId),
       categoryId:       categoryId,
       meta:             p.meta,
+      sourceFilename:   p.sourceFilename || "",
       pageCount:        pageCount,
       currentRevision:  p.rev,
       currentLink:      p.link,
@@ -2403,6 +2492,7 @@ function openFolderForm(folderId, presetParent) {
   $("folderFormTitle").textContent = f ? "Edit folder" : "New folder";
   $("feName").value = f ? (f.name || "") : "";
   $("fePrefix").value = f ? (f.prefix || "") : "";
+  $("feAbbrev").value = f ? (f.abbrev || "") : "";
   $("feMsg").textContent = ""; $("feMsg").className = "o-msg";
   $("feDelete").style.display = f ? "" : "none";
   $("feHideBtn").style.display = f ? "" : "none";
@@ -2480,12 +2570,13 @@ $("feSave").addEventListener("click", async () => {
     if (k && v) meta[k] = v;
   }
   const prefix = $("fePrefix").value.trim().toUpperCase();
+  const abbrev = $("feAbbrev").value.trim();
   $("feSave").disabled = true;
   try {
     if (editFolderId) {
       const f = foldersById.get(editFolderId);
       await updateDoc(doc(db, "folders", editFolderId), {
-        name, parentId: newParent, prefix,
+        name, parentId: newParent, prefix, abbrev,
         ...(newParent !== (f.parentId || null) ? { order: nextOrder(newParent) } : {}),
         meta,
       });
@@ -2493,7 +2584,7 @@ $("feSave").addEventListener("click", async () => {
       await syncPathsUnder(editFolderId);
     } else {
       const ref = await addDoc(collection(db, "folders"), {
-        name, parentId: newParent, prefix, order: nextOrder(newParent), meta,
+        name, parentId: newParent, prefix, abbrev, order: nextOrder(newParent), meta,
       });
       if (newParent) expanded.add(newParent);
       expanded.add(ref.id);
