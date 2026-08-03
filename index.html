@@ -367,6 +367,8 @@
   .kv-row input.k { flex:0 0 42%; }
   .kv-row input.v { flex:1; }
   .kv-row input { background:var(--black-night); }
+  /* the folder picker opens on top of other overlays (batch, drawing form) */
+  #pickerOverlay { z-index:45; }
   .pick-opt {
     display:block; width:100%; text-align:left;
     background:none; border:1.5px solid var(--line); border-radius:8px;
@@ -382,12 +384,30 @@
   .list-row .grow { flex:1; min-width:180px; line-height:1.5; }
 
   /* ---------- batch add ---------- */
+  #batchLinks {
+    width:100%; border:2px solid var(--line); border-radius:10px;
+    color:var(--white); font-size:14px; font-family:Consolas,Menlo,monospace;
+    padding:12px 14px; outline:none;
+    white-space:pre; overflow-x:auto;         /* one line per link, no wrapping */
+    line-height:22px;
+    background-color:var(--black-night);
+    /* alternating line stripes make "one line = one drawing" visible */
+    background-image:repeating-linear-gradient(180deg,
+      rgba(255,255,255,.05) 0 22px, transparent 22px 44px);
+    background-attachment:local;
+    background-origin:content-box;
+  }
+  #batchLinks:focus { border-color:var(--red-bright); }
   .b-shared { display:grid; grid-template-columns: 1fr 180px 90px; gap:12px; margin-top:14px; }
   .b-row {
-    display:grid; grid-template-columns: 26px 190px 1fr; gap:8px; align-items:center;
+    display:grid; grid-template-columns: 26px 165px 1fr 150px 64px 30px; gap:7px; align-items:center;
     padding:7px 0; border-bottom:1px solid var(--line);
   }
-  .b-row input { padding:8px 10px; font-size:14px; background:var(--black-night); }
+  .b-row input, .b-row select { padding:8px 8px; font-size:13.5px; background:var(--black-night); }
+  .b-row input.b-rev { text-transform:uppercase; text-align:center; }
+  .b-row .overridden { border-color:var(--red-deep); }
+  .b-row .b-clear { visibility:hidden; padding:5px 7px; }
+  .b-row .b-clear.show { visibility:visible; }
   .b-status { text-align:center; font-size:15px; }
   .b-note { grid-column: 2 / -1; font-size:12.5px; color:var(--red-bright); line-height:1.4; }
   .b-note.dim { color:var(--text-dim); }
@@ -597,7 +617,7 @@
       <div class="hint" id="linkStatus"></div>
     </div>
     <div class="o-field">
-      <label for="fFilename">Paste the PDF filename <span style="text-transform:none; letter-spacing:0;">(splits into number + description)</span></label>
+      <label for="fFilename">PDF Filename</label>
       <input type="text" id="fFilename" placeholder="e.g. SL-Galaxy-2001-TransomBracket" autocomplete="off">
       <div class="hint" id="filenameStatus"></div>
     </div>
@@ -608,7 +628,7 @@
       </div>
       <div class="o-field">
         <label for="fRev">Revision</label>
-        <input type="text" id="fRev" placeholder="A" maxlength="4" autocomplete="off" style="text-transform:uppercase; text-align:center; font-weight:700;">
+        <input type="text" id="fRev" placeholder="1" maxlength="4" autocomplete="off" style="text-transform:uppercase; text-align:center; font-weight:700;">
       </div>
     </div>
     <div class="o-field">
@@ -731,17 +751,16 @@
 
 <!-- ============ BATCH ADD ============ -->
 <div class="overlay" id="batchOverlay">
-  <div class="box" style="max-width:780px;">
+  <div class="box" style="max-width:900px;">
     <div style="display:flex; align-items:baseline; gap:10px;">
       <h3 class="brand-head">Batch add drawings</h3>
       <button class="mini" id="batchToSingleBtn" style="margin-left:auto;">⇄ Single add</button>
     </div>
     <div class="o-field" id="batchStep1">
       <label for="batchLinks">Share links — one per line</label>
-      <textarea id="batchLinks" rows="6" placeholder="Paste OneDrive 'Anyone with the link' URLs, one per line"
-        style="width:100%; background:var(--black-night); border:2px solid var(--line); border-radius:10px;
-               color:var(--white); font-size:14px; font-family:Consolas,Menlo,monospace; padding:12px 14px; outline:none;"></textarea>
-      <div class="hint">Filenames, numbers and descriptions are read from OneDrive automatically.</div>
+      <textarea id="batchLinks" rows="6" wrap="off" spellcheck="false"
+        placeholder="Paste OneDrive 'Anyone with the link' URLs, one per line"></textarea>
+      <div class="hint" id="batchLinksHint">Filenames, numbers and descriptions are read from OneDrive automatically.</div>
     </div>
     <div class="b-shared">
       <div class="o-field" style="margin-bottom:0;">
@@ -754,7 +773,7 @@
       </div>
       <div class="o-field" style="margin-bottom:0;">
         <label for="batchRev">Revision</label>
-        <input type="text" id="batchRev" maxlength="4" value="A" autocomplete="off"
+        <input type="text" id="batchRev" maxlength="4" value="1" autocomplete="off"
                style="text-transform:uppercase; text-align:center; font-weight:700;">
       </div>
     </div>
@@ -806,7 +825,7 @@ const ENGINEERING_EMAILS = ["design@stellamarine.com.au", "design2@stellamarine.
    drawings open in OneDrive instead. */
 const PROXY_BASE = "https://stella-drawings-proxy.design-fc7.workers.dev";
 
-const APP_VERSION = "3.13";
+const APP_VERSION = "3.14";
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut }
@@ -2091,12 +2110,12 @@ function openDrawingForm(d, presetFolderId) {
                    : (presetFolderId || null);
   $("dwgFormTitle").textContent = d ? "Edit drawing" : "Add drawing";
   $("fLink").value   = d ? (d.currentLink || "") : "";
-  $("fFilename").value = "";
+  formSourceFilename = d ? (d.sourceFilename || "") : "";
+  $("fFilename").value = formSourceFilename;      // stored filename shown as confirmation
   $("filenameStatus").textContent = "";
   $("fNumber").value = d ? (d.drawingNumber || "") : "";
-  $("fRev").value    = d ? (d.currentRevision || "") : "";
+  $("fRev").value    = d ? (d.currentRevision || "") : "1";
   $("fName").value   = d ? (d.drawingName || "") : "";
-  formSourceFilename = d ? (d.sourceFilename || "") : "";
   $("dMetaRows").innerHTML = "";
   const dmeta = (d && d.meta) || {};
   const dkeys = Object.keys(dmeta);
@@ -2158,9 +2177,10 @@ $("dAddRow").addEventListener("click", () => addDrawingMetaRow("", ""));
 
 /* paste the PDF filename → split into the fields, and show what was decided
    so a wrong guess is obvious and easily corrected in the fields below */
-function applyFilename(raw) {
+function applyFilename(raw, reflect = true) {
   const { number, desc } = splitNumberDesc(raw);
   formSourceFilename = raw.trim().replace(/\.pdf$/i, "");   // kept verbatim for downloads
+  if (reflect) $("fFilename").value = formSourceFilename;   // not while typing in that field
   if (number) $("fNumber").value = number;
   if (desc)   $("fName").value = desc;
   $("filenameStatus").textContent = number
@@ -2169,7 +2189,7 @@ function applyFilename(raw) {
 }
 $("fFilename").addEventListener("input", () => {
   const v = $("fFilename").value;
-  if (v.trim()) applyFilename(v);
+  if (v.trim()) applyFilename(v, false);
 });
 /* typing the combined form straight into the number field works too */
 $("fNumber").addEventListener("blur", () => {
@@ -2178,6 +2198,7 @@ $("fNumber").addEventListener("blur", () => {
     const { number, desc } = splitNumberDesc(v);
     if (desc) {
       formSourceFilename = v.trim().replace(/\.pdf$/i, "");
+      $("fFilename").value = formSourceFilename;
       $("fNumber").value = number;
       $("fName").value = desc;
     }
@@ -2864,7 +2885,8 @@ function openBatch(presetFolderId) {
   batchFolderId = presetFolderId || null;
   batchBusy = false;
   $("batchLinks").value = "";
-  $("batchRev").value = "A";
+  $("batchLinksHint").textContent = "Filenames, numbers and descriptions are read from OneDrive automatically.";
+  $("batchRev").value = "1";
   $("batchMsg").textContent = ""; $("batchMsg").className = "o-msg";
   $("batchRows").innerHTML = "";
   $("batchSaveBtn").style.display = "none";
@@ -2912,6 +2934,12 @@ function updateBatchFolderBtn() {
 }
 $("batchFolderBtn").addEventListener("click", () =>
   pickFolder("Put all batch drawings in…", {}, id => { batchFolderId = id; updateBatchFolderBtn(); }));
+$("batchLinks").addEventListener("input", () => {
+  const n = $("batchLinks").value.split(/\r?\n/).filter(s => s.trim()).length;
+  $("batchLinksHint").textContent = n
+    ? `${n} link${n === 1 ? "" : "s"} — each line becomes one drawing.`
+    : "Filenames, numbers and descriptions are read from OneDrive automatically.";
+});
 
 function rowIcon(r) {
   return r.status === "saved" ? "✓"
@@ -2930,9 +2958,31 @@ function updateRowView(r) {
     note.textContent = r.note;
   } else if (note) note.remove();
   const locked = r.status === "saved" || batchBusy;
-  r.el.querySelector(".b-num").disabled = locked;
-  r.el.querySelector(".b-desc").disabled = locked;
+  for (const selctr of [".b-num", ".b-desc", ".b-cat", ".b-rev", ".b-clear"])
+    r.el.querySelector(selctr).disabled = locked;
+  syncRowOverrideView(r);
 }
+/* overridden fields get a marked border and the × to fall back to the globals */
+function syncRowOverrideView(r) {
+  if (!r.el) return;
+  r.el.querySelector(".b-cat").classList.toggle("overridden", r.catOverride !== undefined);
+  r.el.querySelector(".b-rev").classList.toggle("overridden", r.revOverride !== undefined);
+  r.el.querySelector(".b-clear").classList.toggle("show",
+    r.catOverride !== undefined || r.revOverride !== undefined);
+}
+/* the batch-wide category/revision flow into every row that hasn't been
+   manually overridden; manual settings stay put when the globals change */
+function propagateBatchGlobals() {
+  const cat = $("batchCategory").value;
+  const rev = $("batchRev").value.trim().toUpperCase();
+  for (const r of batchRows) {
+    if (!r.el || r.status === "saved") continue;
+    if (r.catOverride === undefined) r.el.querySelector(".b-cat").value = cat;
+    if (r.revOverride === undefined) r.el.querySelector(".b-rev").value = rev;
+  }
+}
+$("batchCategory").addEventListener("change", propagateBatchGlobals);
+$("batchRev").addEventListener("input", propagateBatchGlobals);
 function validateBatchRow(r) {
   if (r.status === "saved" || r.status === "badlink") return;
   if (!r.number) {
@@ -2955,19 +3005,48 @@ function validateBatchRow(r) {
 function buildBatchRowsDom() {
   const el = $("batchRows");
   el.innerHTML = "";
+  const globalCat = $("batchCategory").value;
+  const globalRev = $("batchRev").value.trim().toUpperCase();
   for (const r of batchRows) {
     const row = document.createElement("div");
     row.className = "b-row";
     row.innerHTML = `
       <span class="b-status">…</span>
       <input type="text" class="b-num" placeholder="Number" autocomplete="off">
-      <input type="text" class="b-desc" placeholder="Description (optional)" autocomplete="off">`;
+      <input type="text" class="b-desc" placeholder="Description (optional)" autocomplete="off">
+      <select class="b-cat" title="Category for this drawing"></select>
+      <input type="text" class="b-rev" maxlength="4" title="Revision for this drawing" autocomplete="off">
+      <button class="mini b-clear" title="Back to the batch settings">×</button>`;
     r.el = row;
+    const catSel = row.querySelector(".b-cat");
+    const oNone = document.createElement("option");
+    oNone.value = ""; oNone.textContent = "— none —";
+    catSel.appendChild(oNone);
+    for (const c of categories) {
+      const o = document.createElement("option");
+      o.value = c.id; o.textContent = c.name;
+      catSel.appendChild(o);
+    }
+    catSel.value = globalCat;
+    row.querySelector(".b-rev").value = globalRev;
+
     row.querySelector(".b-num").addEventListener("input", e => { r.number = e.target.value.trim(); });
     row.querySelector(".b-num").addEventListener("blur", () => {
       if (r.status !== "saved" && r.status !== "badlink" && !batchBusy) { validateBatchRow(r); updateRowView(r); }
     });
     row.querySelector(".b-desc").addEventListener("input", e => { r.desc = e.target.value; });
+    catSel.addEventListener("change", () => { r.catOverride = catSel.value; syncRowOverrideView(r); });
+    row.querySelector(".b-rev").addEventListener("input", e => {
+      r.revOverride = e.target.value.trim().toUpperCase();
+      syncRowOverrideView(r);
+    });
+    row.querySelector(".b-clear").addEventListener("click", () => {
+      delete r.catOverride;
+      delete r.revOverride;
+      catSel.value = $("batchCategory").value;
+      row.querySelector(".b-rev").value = $("batchRev").value.trim().toUpperCase();
+      syncRowOverrideView(r);
+    });
     el.appendChild(row);
     updateRowView(r);
   }
@@ -3037,14 +3116,16 @@ $("batchResolveBtn").addEventListener("click", async () => {
 
 $("batchSaveBtn").addEventListener("click", async () => {
   if (batchBusy) return;
-  const rev = $("batchRev").value.trim().toUpperCase();
-  const categoryId = $("batchCategory").value || null;
+  const globalRev = $("batchRev").value.trim().toUpperCase();
+  const globalCat = $("batchCategory").value;
   const msg = $("batchMsg");
   batchRows.forEach(r => { if (r.status !== "saved" && r.status !== "badlink") validateBatchRow(r); });
   batchRows.forEach(updateRowView);
   const todo = batchRows.filter(r => r.status === "ok");
-  if (!rev) { msg.className = "o-msg bad"; msg.textContent = "Set the revision — it applies to every drawing in the batch."; return; }
   if (!batchFolderId) { msg.className = "o-msg bad"; msg.textContent = "Choose the folder for this batch."; return; }
+  if (!globalRev && todo.some(r => r.revOverride === undefined)) {
+    msg.className = "o-msg bad"; msg.textContent = "Set the batch revision (or a revision on every row)."; return;
+  }
   if (!todo.length) { msg.className = "o-msg bad"; msg.textContent = "No rows are ready to save."; return; }
   batchBusy = true;
   $("batchSaveBtn").disabled = true;
@@ -3055,6 +3136,14 @@ $("batchSaveBtn").addEventListener("click", async () => {
     n++;
     msg.className = "o-msg";
     msg.textContent = `Saving ${n} of ${todo.length} — ${r.number}…`;
+    // row overrides win over the batch-wide settings
+    const rev = (r.revOverride !== undefined ? r.revOverride : globalRev).trim().toUpperCase();
+    const categoryId = (r.catOverride !== undefined ? r.catOverride : globalCat) || null;
+    if (!rev) {
+      r.status = "failed"; r.note = "Failed — no revision set on this row"; failed++;
+      updateRowView(r);
+      continue;
+    }
     r.status = "saving"; updateRowView(r);
     try {
       if (findByNumber(r.number, null)) throw new Error("that number now exists");
@@ -3089,6 +3178,7 @@ $("batchSaveBtn").addEventListener("click", async () => {
   expanded.add(batchFolderId); saveExpanded();
   msg.className = failed ? "o-msg bad" : "o-msg ok";
   msg.textContent = `Saved ${saved} of ${todo.length}.` + (failed ? ` ${failed} failed — fix and press Save again.` : "");
+  if (!failed) setTimeout(() => $("batchOverlay").classList.remove("show"), 900);
 });
 
 /* ================= expand / collapse all ================= */
