@@ -36,7 +36,7 @@ function corsHeaders(origin) {
     "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
     "Access-Control-Allow-Headers": "Range",
     "Access-Control-Expose-Headers":
-      "Content-Length, Content-Range, Accept-Ranges, X-Proxy-Error",
+      "Content-Length, Content-Range, Accept-Ranges, X-Proxy-Error, X-Proxy-Filename",
     "Vary": "Origin",
   };
 }
@@ -192,6 +192,19 @@ export default {
     out.set("Content-Disposition", "inline");
     /* browsers always revalidate with us; the freshness window lives at the edge */
     out.set("Cache-Control", "no-store");
+
+    /* pass the original filename through — the app uses it to fill the
+       drawing number and description from nothing but the share link.
+       URI-encoded because header values must be Latin-1. */
+    const cd = upstream.res.headers.get("Content-Disposition") || "";
+    let fn = "";
+    let m = cd.match(/filename\*=(?:UTF-8''|utf-8'')([^;]+)/i);
+    if (m) { try { fn = decodeURIComponent(m[1].trim().replace(/^"|"$/g, "")); } catch {} }
+    if (!fn) {
+      m = cd.match(/filename="([^"]+)"/i) || cd.match(/filename=([^;]+)/i);
+      if (m) fn = m[1].trim();
+    }
+    if (fn) out.set("X-Proxy-Filename", encodeURIComponent(fn));
 
     if (isHead)
       return new Response(null, { status: 200, headers: out });

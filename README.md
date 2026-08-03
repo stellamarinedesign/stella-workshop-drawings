@@ -38,10 +38,16 @@ roll out to idle devices automatically).
 
 ## Engineering tools (design accounts)
 - **＋ Drawing / ＋ Folder** in the toolbar, or ＋ buttons on any folder band.
-  The drawing form splits pasted PDF filenames into number + description
-  automatically (part codes like `ST0071D` and series numbers like
-  `SL-Galaxy-2003` are both understood), keeps the original filename for
-  downloads, probes the page count, and pre-warms the preview cache.
+  Pasting the share link is usually all it takes: the app reads the file's
+  real name from OneDrive and fills the number + description itself (part
+  codes like `ST0071D` and series numbers like `SL-Galaxy-2003` are both
+  understood). The original filename is kept for downloads, the page count is
+  probed, and the preview cache pre-warmed.
+- **＋ Batch** adds many drawings at once: paste share links one per line,
+  filenames are read automatically into an editable preview (duplicates
+  against the library and within the batch are flagged), then one folder,
+  category and revision apply to the lot and a single Save writes them all
+  with per-row results.
 - **Part info** (Material code / Material description lead the display) shows
   on tiles, in the viewer header, and is searchable.
 - **Folders**: drag-and-drop or edit-form moves, reorder arrows, per-folder

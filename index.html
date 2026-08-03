@@ -381,6 +381,17 @@
   }
   .list-row .grow { flex:1; min-width:180px; line-height:1.5; }
 
+  /* ---------- batch add ---------- */
+  .b-shared { display:grid; grid-template-columns: 1fr 180px 90px; gap:12px; margin-top:14px; }
+  .b-row {
+    display:grid; grid-template-columns: 26px 190px 1fr; gap:8px; align-items:center;
+    padding:7px 0; border-bottom:1px solid var(--line);
+  }
+  .b-row input { padding:8px 10px; font-size:14px; background:var(--black-night); }
+  .b-status { text-align:center; font-size:15px; }
+  .b-note { grid-column: 2 / -1; font-size:12.5px; color:var(--red-bright); line-height:1.4; }
+  .b-note.dim { color:var(--text-dim); }
+
   /* ---------- PDF viewer overlay ---------- */
   #viewerOverlay {
     display:none; position:fixed; inset:0; z-index:50;
@@ -520,6 +531,7 @@
     <span id="previewNote">Floor view — editing off</span>
     <span id="editTools">
       <button class="mini" id="addDrawingBtn">＋ Drawing</button>
+      <button class="mini" id="addBatchBtn">＋ Batch</button>
       <button class="mini" id="addFolderBtn">＋ Folder</button>
       <button class="mini" id="expandAllBtn">Expand all</button>
       <button class="mini" id="collapseAllBtn">Collapse all</button>
@@ -715,6 +727,42 @@
   </div>
 </div>
 
+<!-- ============ BATCH ADD ============ -->
+<div class="overlay" id="batchOverlay">
+  <div class="box" style="max-width:780px;">
+    <h3 class="brand-head">Batch add drawings</h3>
+    <div class="o-field" id="batchStep1">
+      <label for="batchLinks">Share links — one per line</label>
+      <textarea id="batchLinks" rows="6" placeholder="Paste OneDrive 'Anyone with the link' URLs, one per line"
+        style="width:100%; background:var(--black-night); border:2px solid var(--line); border-radius:10px;
+               color:var(--white); font-size:14px; font-family:Consolas,Menlo,monospace; padding:12px 14px; outline:none;"></textarea>
+      <div class="hint">Filenames, numbers and descriptions are read from OneDrive automatically.</div>
+    </div>
+    <div class="b-shared">
+      <div class="o-field" style="margin-bottom:0;">
+        <label>Folder <span style="text-transform:none; letter-spacing:0;">(all of them)</span></label>
+        <button class="ghost" id="batchFolderBtn" style="width:100%; text-align:left; padding:11px 14px;"></button>
+      </div>
+      <div class="o-field" style="margin-bottom:0;">
+        <label for="batchCategory">Category</label>
+        <select id="batchCategory"></select>
+      </div>
+      <div class="o-field" style="margin-bottom:0;">
+        <label for="batchRev">Revision</label>
+        <input type="text" id="batchRev" maxlength="4" value="A" autocomplete="off"
+               style="text-transform:uppercase; text-align:center; font-weight:700;">
+      </div>
+    </div>
+    <div id="batchRows" style="margin-top:16px;"></div>
+    <div class="o-actions">
+      <button class="primary" id="batchResolveBtn">Read filenames</button>
+      <button class="primary" id="batchSaveBtn" style="display:none;">Save drawings</button>
+      <button class="ghost" id="batchCancelBtn">Close</button>
+    </div>
+    <div class="o-msg" id="batchMsg"></div>
+  </div>
+</div>
+
 <!-- ============ FLAG SHEET (floor report) ============ -->
 <div id="sheetOverlay"></div>
 <div id="flagSheet" role="dialog" aria-modal="true">
@@ -753,7 +801,7 @@ const ENGINEERING_EMAILS = ["design@stellamarine.com.au", "design2@stellamarine.
    drawings open in OneDrive instead. */
 const PROXY_BASE = "https://stella-drawings-proxy.design-fc7.workers.dev";
 
-const APP_VERSION = "3.11";
+const APP_VERSION = "3.12";
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut }
@@ -1697,6 +1745,16 @@ function fetchDrawingBytes(d, signal) {
     return res.arrayBuffer();
   });
 }
+/* ask the proxy (HEAD, one byte) what OneDrive calls this file — lets a bare
+   share link fill in the number and description by itself */
+async function resolveLinkFilename(link, signal) {
+  const url = proxySrc({ currentLink: link });
+  if (!url) throw new Error("Not a OneDrive/SharePoint link.");
+  const res = await fetch(url, { method: "HEAD", cache: "no-store", signal });
+  if (!res.ok) throw new Error(res.headers.get("X-Proxy-Error") || ("HTTP " + res.status));
+  const raw = res.headers.get("X-Proxy-Filename") || "";
+  try { return decodeURIComponent(raw); } catch { return raw; }
+}
 /* print via a hidden same-origin blob iframe — the browser's own PDF print
    path, no popups. Falls back to opening a tab if the browser refuses. */
 let printFrame = null;
@@ -2228,11 +2286,31 @@ $("fLink").addEventListener("input", () => {
   if (ok && !$("fNumber").value.trim()) {
     const fn = filenameFromLink(v);
     if (fn) {
-      $("fNumber").value = fn;
-      st.textContent = `Drawing number "${fn}" taken from the link — check it's right.`;
+      applyFilename(fn);
+      st.textContent = `Filename read from the link — check the split below.`;
+    } else {
+      // opaque share link: ask the proxy for the real filename in the background
+      if (linkResolveCtrl) linkResolveCtrl.abort();
+      const ctrl = new AbortController();
+      linkResolveCtrl = ctrl;
+      const forValue = v;
+      st.textContent = "Reading the filename from OneDrive…";
+      resolveLinkFilename(v, ctrl.signal).then(name => {
+        if (ctrl.signal.aborted || $("fLink").value.trim() !== forValue) return;
+        if (name && !$("fNumber").value.trim()) {
+          applyFilename(name);
+          st.textContent = `Filename read from OneDrive: ${name} — check the split below.`;
+        } else {
+          st.textContent = "Couldn't read the filename automatically — paste it below.";
+        }
+      }).catch(() => {
+        if (!ctrl.signal.aborted && $("fLink").value.trim() === forValue)
+          st.textContent = "Couldn't read the filename automatically — paste it below.";
+      });
     }
   }
 });
+let linkResolveCtrl = null;
 
 $("dwgSaveBtn").addEventListener("click", async () => {
   const link   = $("fLink").value.trim();
@@ -2767,6 +2845,229 @@ $("catAddBtn").addEventListener("click", async () => {
   });
 });
 
+/* ================= batch add =================
+   Paste share links only; the proxy reports each file's real name, which
+   fills number + description. One folder / category / revision for the lot. */
+let batchRows = [];
+let batchFolderId = null;
+let batchBusy = false;
+let batchCtrl = null;
+
+function openBatch() {
+  batchRows = [];
+  batchFolderId = null;
+  batchBusy = false;
+  $("batchLinks").value = "";
+  $("batchRev").value = "A";
+  $("batchMsg").textContent = ""; $("batchMsg").className = "o-msg";
+  $("batchRows").innerHTML = "";
+  $("batchSaveBtn").style.display = "none";
+  $("batchResolveBtn").disabled = false;
+  $("batchResolveBtn").textContent = "Read filenames";
+  const sel = $("batchCategory");
+  sel.innerHTML = "";
+  const oNone = document.createElement("option");
+  oNone.value = ""; oNone.textContent = "— none —";
+  sel.appendChild(oNone);
+  for (const c of categories) {
+    const o = document.createElement("option");
+    o.value = c.id; o.textContent = c.name;
+    sel.appendChild(o);
+  }
+  updateBatchFolderBtn();
+  $("batchOverlay").classList.add("show");
+}
+$("addBatchBtn").addEventListener("click", openBatch);
+$("batchCancelBtn").addEventListener("click", () => {
+  if (batchCtrl) batchCtrl.abort();
+  $("batchOverlay").classList.remove("show");
+});
+function updateBatchFolderBtn() {
+  $("batchFolderBtn").textContent = batchFolderId
+    ? "📁 " + pathOf(batchFolderId).split("/").join(" / ")
+    : "Choose folder…";
+}
+$("batchFolderBtn").addEventListener("click", () =>
+  pickFolder("Put all batch drawings in…", {}, id => { batchFolderId = id; updateBatchFolderBtn(); }));
+
+function rowIcon(r) {
+  return r.status === "saved" ? "✓"
+       : r.status === "ok" ? "•"
+       : r.status === "resolving" || r.status === "saving" ? "…"
+       : r.status === "badlink" || r.status === "failed" ? "✕"
+       : "⚠";
+}
+function updateRowView(r) {
+  if (!r.el) return;
+  r.el.querySelector(".b-status").textContent = rowIcon(r);
+  let note = r.el.querySelector(".b-note");
+  if (r.note) {
+    if (!note) { note = document.createElement("div"); r.el.appendChild(note); }
+    note.className = "b-note" + ((r.status === "ok" || r.status === "saved") ? " dim" : "");
+    note.textContent = r.note;
+  } else if (note) note.remove();
+  const locked = r.status === "saved" || batchBusy;
+  r.el.querySelector(".b-num").disabled = locked;
+  r.el.querySelector(".b-desc").disabled = locked;
+}
+function validateBatchRow(r) {
+  if (r.status === "saved" || r.status === "badlink") return;
+  if (!r.number) {
+    r.status = "noname";
+    r.note = "Needs a drawing number" + (r.filename ? "" : " — the filename couldn't be read");
+    return;
+  }
+  const existing = findByNumber(r.number, null);
+  if (existing) {
+    r.status = "dupe";
+    r.note = `${existing.drawingNumber} already exists — edit that one individually, or change this number`;
+    return;
+  }
+  const twin = batchRows.find(x => x !== r && x.status !== "badlink"
+    && (x.number || "").trim().toLowerCase() === r.number.trim().toLowerCase());
+  if (twin) { r.status = "dupe"; r.note = "Same number appears twice in this batch"; return; }
+  r.status = "ok";
+  r.note = r.filename ? "" : "Number entered manually";
+}
+function buildBatchRowsDom() {
+  const el = $("batchRows");
+  el.innerHTML = "";
+  for (const r of batchRows) {
+    const row = document.createElement("div");
+    row.className = "b-row";
+    row.innerHTML = `
+      <span class="b-status">…</span>
+      <input type="text" class="b-num" placeholder="Number" autocomplete="off">
+      <input type="text" class="b-desc" placeholder="Description (optional)" autocomplete="off">`;
+    r.el = row;
+    row.querySelector(".b-num").addEventListener("input", e => { r.number = e.target.value.trim(); });
+    row.querySelector(".b-num").addEventListener("blur", () => {
+      if (r.status !== "saved" && r.status !== "badlink" && !batchBusy) { validateBatchRow(r); updateRowView(r); }
+    });
+    row.querySelector(".b-desc").addEventListener("input", e => { r.desc = e.target.value; });
+    el.appendChild(row);
+    updateRowView(r);
+  }
+}
+
+$("batchResolveBtn").addEventListener("click", async () => {
+  if (batchBusy) return;
+  const lines = [...new Set($("batchLinks").value.split(/\r?\n/).map(s => s.trim()).filter(Boolean))];
+  const msg = $("batchMsg");
+  if (!lines.length) { msg.className = "o-msg bad"; msg.textContent = "Paste at least one link."; return; }
+  batchBusy = true;
+  $("batchResolveBtn").disabled = true;
+  batchCtrl = new AbortController();
+  batchRows = lines.map(link => ({ link, filename: "", number: "", desc: "", status: "resolving", note: "" }));
+  buildBatchRowsDom();
+  msg.className = "o-msg";
+  let done = 0;
+  const total = batchRows.length;
+  msg.textContent = `Reading 0 of ${total}…`;
+  const pool = Array.from({ length: Math.min(3, total) }, async () => {
+    for (;;) {
+      const r = batchRows.find(x => x.status === "resolving" && !x.claimed);
+      if (!r) return;
+      r.claimed = true;
+      let okHost = false;
+      try {
+        const u = new URL(r.link);
+        const h = u.hostname.toLowerCase();
+        okHost = u.protocol === "https:" && (h.endsWith(".sharepoint.com") || h === "1drv.ms");
+      } catch {}
+      if (!okHost) {
+        r.status = "badlink";
+        r.note = "Not a OneDrive/SharePoint link";
+      } else {
+        try {
+          const name = await resolveLinkFilename(r.link, batchCtrl.signal);
+          r.filename = (name || "").replace(/\.pdf$/i, "");
+          if (r.filename) {
+            const s = splitNumberDesc(r.filename);
+            r.number = s.number; r.desc = s.desc;
+          }
+          r.status = "pending";
+          validateBatchRow(r);
+        } catch (e) {
+          if (e && e.name === "AbortError") return;
+          r.status = "pending";
+          validateBatchRow(r);           // no number yet → flagged for manual entry
+        }
+      }
+      if (r.el) {
+        r.el.querySelector(".b-num").value = r.number || "";
+        r.el.querySelector(".b-desc").value = r.desc || "";
+      }
+      updateRowView(r);
+      msg.textContent = `Reading ${++done} of ${total}…`;
+    }
+  });
+  await Promise.all(pool);
+  batchBusy = false;
+  batchRows.forEach(updateRowView);
+  $("batchResolveBtn").disabled = false;
+  $("batchResolveBtn").textContent = "Re-read links";
+  $("batchSaveBtn").style.display = "";
+  const ready = batchRows.filter(r => r.status === "ok").length;
+  msg.textContent = `${ready} of ${total} ready. Fix any ⚠ rows, pick the folder, then Save.`;
+});
+
+$("batchSaveBtn").addEventListener("click", async () => {
+  if (batchBusy) return;
+  const rev = $("batchRev").value.trim().toUpperCase();
+  const categoryId = $("batchCategory").value || null;
+  const msg = $("batchMsg");
+  batchRows.forEach(r => { if (r.status !== "saved" && r.status !== "badlink") validateBatchRow(r); });
+  batchRows.forEach(updateRowView);
+  const todo = batchRows.filter(r => r.status === "ok");
+  if (!rev) { msg.className = "o-msg bad"; msg.textContent = "Set the revision — it applies to every drawing in the batch."; return; }
+  if (!batchFolderId) { msg.className = "o-msg bad"; msg.textContent = "Choose the folder for this batch."; return; }
+  if (!todo.length) { msg.className = "o-msg bad"; msg.textContent = "No rows are ready to save."; return; }
+  batchBusy = true;
+  $("batchSaveBtn").disabled = true;
+  $("batchResolveBtn").disabled = true;
+  const who = (auth.currentUser && auth.currentUser.email) || "engineering";
+  let saved = 0, failed = 0, n = 0;
+  for (const r of todo) {
+    n++;
+    msg.className = "o-msg";
+    msg.textContent = `Saving ${n} of ${todo.length} — ${r.number}…`;
+    r.status = "saving"; updateRowView(r);
+    try {
+      if (findByNumber(r.number, null)) throw new Error("that number now exists");
+      const pageCount = await fetchPageCount(r.link);   // also pre-warms the preview cache
+      const ref = await addDoc(collection(db, "drawings"), {
+        drawingName:      (r.desc || "").trim(),
+        drawingNumber:    r.number,
+        folderId:         batchFolderId,
+        folderPath:       pathOf(batchFolderId),
+        categoryId:       categoryId,
+        meta:             {},
+        sourceFilename:   r.filename || "",
+        pageCount:        pageCount,
+        currentRevision:  rev,
+        currentLink:      r.link,
+        currentUpdatedAt: serverTimestamp(),
+        currentUpdatedBy: who,
+      });
+      await addDoc(collection(db, "drawings", ref.id, "revisions"), {
+        revision: rev, link: r.link, savedAt: serverTimestamp(), savedBy: who,
+        forced: false, replaced: null,
+      });
+      r.status = "saved"; r.note = "Saved"; saved++;
+    } catch (e) {
+      r.status = "failed"; r.note = "Failed — " + (e.message || e); failed++;
+    }
+    updateRowView(r);
+  }
+  batchBusy = false;
+  $("batchSaveBtn").disabled = false;
+  $("batchResolveBtn").disabled = false;
+  expanded.add(batchFolderId); saveExpanded();
+  msg.className = failed ? "o-msg bad" : "o-msg ok";
+  msg.textContent = `Saved ${saved} of ${todo.length}.` + (failed ? ` ${failed} failed — fix and press Save again.` : "");
+});
+
 /* ================= expand / collapse all ================= */
 $("expandAllBtn").addEventListener("click", () => {
   for (const f of foldersById.values()) expanded.add(f.id);
@@ -2812,7 +3113,7 @@ for (const ev of ["touchstart", "mousedown", "keydown", "wheel", "scroll"])
 
 function anyOverlayOpen() {
   return ["viewerOverlay","drawingOverlay","folderOverlay","categoryOverlay",
-          "flagsOverlay","pickerOverlay","flagSheet"]
+          "flagsOverlay","pickerOverlay","flagSheet","batchOverlay"]
     .some(id => $(id).classList.contains("show"));
 }
 function maybeAutoReload() {
