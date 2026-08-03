@@ -52,6 +52,19 @@ add/edit drawings in an overlay, manage folders inline, drag things around.
   and Download — multi-page drawings keep all their pages. Combining happens
   in the browser with pdf-lib via the proxy; OneDrive is only ever fetched
   per-file.
+- **Combined files are named to convention**: `_[Prefix]-[Folder]-2999-Combined.pdf`
+  — e.g. the Galaxy folder under Stella Lifters (prefix `SL`) downloads as
+  `_SL-Galaxy-2999-Combined.pdf`. The prefix is set in the **Prefix** field on
+  top-level folders (folder ✎ → Prefix); 2999/Combined is the fixed
+  number/description for combined sets, and the leading underscore sorts the
+  file to the top of a name-sorted folder. No prefix set → it's simply omitted.
+- **Hide a whole folder from the floor** (folder ✎ → Hide from floor): the
+  folder and everything under it disappear from the workshop view and search —
+  an in-progress state for uploading draft PDFs and using print/combine before
+  release. Engineering sees hidden folders dimmed with a "hidden from floor"
+  chip (subfolders show "in hidden folder"); Unhide from the same place when
+  ready. The design account's 👁 View-as-floor toggle is the quick way to
+  check what the workshop actually sees.
 - **Part info** on each drawing is a free-form key/value list. The suggested
   keys are **Material code** and **Material description** — set those and they
   lead the viewer's header strip in stores order ("SL0325 · 16mm x 6m Solid
@@ -233,6 +246,9 @@ folders/{autoId}
   name        "Lifters"
   parentId    null | folderId     ← null = top level
   order       number              ← manual sort within parent
+  prefix      "SL"                ← top-level folders only; names combined PDFs
+  hidden      true                ← optional; hides the whole subtree from the
+                                    floor (draft/in-progress state)
   meta        { "Raw material": "6mm 5083 plate", "Material code": "…", … }
                                   ← free-form key/value, shown on the folder row
 

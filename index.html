@@ -182,6 +182,16 @@
   }
   .f-row.dragover { border-color:var(--red-bright); background:rgba(234,55,46,.10); }
   .f-row.flash { border-color:var(--red-bright); background:rgba(234,55,46,.14); }
+  /* draft folders (engineering view only — the floor never renders them) */
+  .f-row.is-hidden { opacity:.6; border-left-color:var(--line); }
+  .f-hiddenchip {
+    color:var(--text-dim); font-size:11.5px; letter-spacing:.04em; flex-shrink:0;
+    border:1px dashed var(--line); border-radius:6px; padding:1px 7px;
+  }
+  .f-prefix {
+    color:var(--red-bright); font-size:11.5px; font-weight:700; letter-spacing:.06em; flex-shrink:0;
+    border:1px solid var(--red-deep); border-radius:6px; padding:1px 6px;
+  }
   .f-toggle {
     flex-shrink:0; width:38px; height:38px;
     background:none; border:none; color:var(--text-dim);
@@ -637,6 +647,11 @@
       <label for="feParent">Inside</label>
       <select id="feParent"></select>
     </div>
+    <div class="o-field" id="fePrefixWrap" style="display:none;">
+      <label for="fePrefix">Prefix <span style="text-transform:none; letter-spacing:0;">(top-level folders only)</span></label>
+      <input type="text" id="fePrefix" maxlength="6" placeholder="e.g. SL" autocomplete="off" style="text-transform:uppercase; width:140px;">
+      <div class="hint">Used to name combined PDFs from anywhere under this folder — e.g. prefix SL on Stella Lifters makes the Galaxy folder's combined file "_SL-Galaxy-2999-Combined.pdf".</div>
+    </div>
     <div class="o-field">
       <label>Project info <span style="text-transform:none; letter-spacing:0;">(shown on the floor)</span></label>
       <div id="feMetaRows"></div>
@@ -646,7 +661,8 @@
     <div class="o-actions">
       <button class="primary" id="feSave">Save folder</button>
       <button class="ghost" id="feCancel">Cancel</button>
-      <button class="mini danger" id="feDelete" style="display:none; margin-left:auto;">Delete folder</button>
+      <button class="mini" id="feHideBtn" style="display:none; margin-left:auto;">Hide from floor</button>
+      <button class="mini danger" id="feDelete" style="display:none;">Delete folder</button>
     </div>
     <div class="o-msg" id="feMsg"></div>
   </div>
@@ -726,7 +742,7 @@ const ENGINEERING_EMAILS = ["design@stellamarine.com.au", "design2@stellamarine.
    drawings open in OneDrive instead. */
 const PROXY_BASE = "https://stella-drawings-proxy.design-fc7.workers.dev";
 
-const APP_VERSION = "3.9";
+const APP_VERSION = "3.10";
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut }
@@ -745,6 +761,7 @@ let drawings = [];              // all drawing docs (hidden ones included for en
 let foldersById = new Map();
 let childrenOf  = new Map();    // parentId ("root") -> sorted [folder]
 let drawingsIn  = new Map();    // folderId ("root" = unfiled) -> sorted [drawing]
+let hiddenFolderSet = new Set();// folders hidden from the floor, incl. everything under one
 let categories  = [];           // {id, name, order}
 let openFlags   = [];           // unresolved flags
 let flaggedIds  = new Set();
@@ -897,7 +914,8 @@ function refreshUI() {
   for (const id of [...expanded])
     if (!foldersById.has(id)) { expanded.delete(id); pruned = true; }
   if (pruned) saveExpanded();
-  $("countLabel").textContent = drawings.filter(d => !d.hidden).length + " drawings";
+  $("countLabel").textContent = drawings.filter(d =>
+    !d.hidden && (isEng || !(d.folderId && hiddenFolderSet.has(d.folderId)))).length + " drawings";
   $("errorBanner").classList.remove("show");
   renderFlagsBadge();
   buildPills();
@@ -925,6 +943,16 @@ function rebuildIndexes() {
   }
   for (const list of drawingsIn.values())
     list.sort((a,b) => (a.drawingNumber||"").localeCompare(b.drawingNumber||"", undefined, {numeric:true}));
+  // a hidden folder hides its whole subtree from the floor
+  hiddenFolderSet = new Set();
+  const walkHidden = (pid, anc) => {
+    for (const f of (childrenOf.get(pid) || [])) {
+      const h = anc || !!f.hidden;
+      if (h) hiddenFolderSet.add(f.id);
+      walkHidden(f.id, h);
+    }
+  };
+  walkHidden("root", false);
 }
 
 /* ================= shared helpers ================= */
@@ -1080,6 +1108,7 @@ function filenameFromLink(url) {
 /* ================= category filter ================= */
 function drawingVisible(d) {
   if (d.hidden && !isEng) return false;
+  if (!isEng && d.folderId && hiddenFolderSet.has(d.folderId)) return false;  // draft folder
   return activeCategory ? d.categoryId === activeCategory : true;
 }
 function subtreeCount(folderId) {
@@ -1143,6 +1172,7 @@ function render() {
 function renderLevel(parentId, depth) {
   const frag = document.createDocumentFragment();
   for (const f of (childrenOf.get(parentId) || [])) {
+    if (!isEng && hiddenFolderSet.has(f.id)) continue; // draft folders: floor never sees them
     const count = subtreeCount(f.id);
     if (activeCategory && count === 0) continue;      // category filter hides empty branches
     frag.appendChild(folderRow(f, depth, count));
@@ -1165,13 +1195,16 @@ function folderRow(f, depth, count) {
   // no button at all when there are none (also prevents an accidental
   // print-everything from a parent that only holds subfolders)
   const ownActive = (drawingsIn.get(f.id) || []).filter(d => !d.hidden).length;
+  const effHidden = hiddenFolderSet.has(f.id);      // own flag OR inherited from an ancestor
   const row = document.createElement("div");
-  row.className = "f-row";
+  row.className = "f-row" + (effHidden ? " is-hidden" : "");
   row.style.marginLeft = (depth * 22) + "px";
   row.dataset.fid = f.id;
   row.innerHTML = `
     <button class="f-toggle${hasKids ? "" : " leaf"}" aria-label="${open ? "Collapse" : "Expand"}">${open ? "▾" : "▸"}</button>
     <span class="f-name" ${isEng ? 'draggable="true"' : ""}>${escapeHtml(f.name || "?")}</span>
+    ${!f.parentId && f.prefix ? `<span class="f-prefix">${escapeHtml(f.prefix)}</span>` : ""}
+    ${effHidden ? `<span class="f-hiddenchip">${f.hidden ? "hidden from floor" : "in hidden folder"}</span>` : ""}
     <span class="f-count">${count || ""}</span>
     ${metaText ? `<span class="f-info" title="${escapeHtml(metaText)}">${escapeHtml(metaText)}</span>` : ""}
     <span class="f-btns">
@@ -1344,6 +1377,7 @@ function renderSearch() {
   // match on the folder's own name only — including the full path here made an
   // ancestor's name "hit" every folder underneath it
   const folderHits = [...foldersById.values()].filter(f => {
+    if (!isEng && hiddenFolderSet.has(f.id)) return false;   // draft folders stay off the floor
     const text = norm(f.name);
     return words.every(w => fuzzyWordMatch(w, text, text.split(" ")));
   });
@@ -1691,12 +1725,28 @@ async function fetchAllBytes(list, onProgress, signal) {
 
 /* one scrollable PDF of every drawing DIRECTLY in the folder (subfolders are
    deliberately not included), printable and downloadable as a single file */
+/* combined files follow the drawing convention: _[Prefix]-[Folder]-2999-Combined
+   — prefix comes from the folder's TOP-LEVEL ancestor (e.g. SL on Stella
+   Lifters), 2999-Combined is the fixed number/description for combined sets,
+   and the leading underscore sorts it to the top of a name-sorted folder. */
+function topAncestor(folderId) {
+  let f = foldersById.get(folderId), hops = 0;
+  while (f && f.parentId && hops++ < 20) f = foldersById.get(f.parentId);
+  return f || null;
+}
+function combinedFilename(f) {
+  const top = topAncestor(f.id);
+  const prefix = top && top.prefix ? String(top.prefix).trim() : "";
+  const cleanName = (f.name || "folder").replace(/\s+/g, "").replace(/[\\/:*?"<>|.]+/g, "-");
+  return "_" + [prefix, cleanName, "2999", "Combined"].filter(Boolean).join("-") + ".pdf";
+}
+
 async function openCombinedViewer(f) {
   const list = (drawingsIn.get(f.id) || []).filter(d => !d.hidden);
   if (!list.length) return;
   viewerDrawing = null;
   viewerBytes = null;
-  viewerFilename = (f.name || "folder").replace(/[\\/:*?"<>|]+/g, "-") + " - drawings.pdf";
+  viewerFilename = combinedFilename(f);
   $("vRev").textContent = "ALL";
   $("vTitle").textContent = (f.name || "?") + " — " + list.length + " drawing" + (list.length === 1 ? "" : "s") + " combined";
   $("vFlagBtn").style.display = "none";
@@ -2352,8 +2402,11 @@ function openFolderForm(folderId, presetParent) {
   const f = folderId ? foldersById.get(folderId) : null;
   $("folderFormTitle").textContent = f ? "Edit folder" : "New folder";
   $("feName").value = f ? (f.name || "") : "";
+  $("fePrefix").value = f ? (f.prefix || "") : "";
   $("feMsg").textContent = ""; $("feMsg").className = "o-msg";
   $("feDelete").style.display = f ? "" : "none";
+  $("feHideBtn").style.display = f ? "" : "none";
+  $("feHideBtn").textContent = f && f.hidden ? "Unhide (show on floor)" : "Hide from floor";
 
   const pSel = $("feParent");
   pSel.innerHTML = "";
@@ -2369,6 +2422,7 @@ function openFolderForm(folderId, presetParent) {
     pSel.appendChild(o);
   }
   pSel.value = f ? (f.parentId || "") : (presetParent || "");
+  toggleFePrefix();
 
   $("feMetaRows").innerHTML = "";
   const meta = (f && f.meta) || {};
@@ -2381,6 +2435,21 @@ function openFolderForm(folderId, presetParent) {
 }
 $("addFolderBtn").addEventListener("click", () => openFolderForm(null, null));
 $("feCancel").addEventListener("click", () => $("folderOverlay").classList.remove("show"));
+/* the prefix only means anything on a top-level folder */
+function toggleFePrefix() {
+  $("fePrefixWrap").style.display = $("feParent").value === "" ? "" : "none";
+}
+$("feParent").addEventListener("change", toggleFePrefix);
+$("feHideBtn").addEventListener("click", async () => {
+  if (!editFolderId || $("feHideBtn").disabled) return;
+  const f = foldersById.get(editFolderId);
+  $("feHideBtn").disabled = true;
+  try {
+    await updateDoc(doc(db, "folders", editFolderId), { hidden: !f.hidden });
+    $("folderOverlay").classList.remove("show");
+  } catch (err) { alert("Couldn't update — " + err.message); }
+  $("feHideBtn").disabled = false;
+});
 function addMetaRow(k, v) {
   const row = document.createElement("div");
   row.className = "kv-row";
@@ -2410,12 +2479,13 @@ $("feSave").addEventListener("click", async () => {
     const v = row.querySelector(".v").value.trim();
     if (k && v) meta[k] = v;
   }
+  const prefix = $("fePrefix").value.trim().toUpperCase();
   $("feSave").disabled = true;
   try {
     if (editFolderId) {
       const f = foldersById.get(editFolderId);
       await updateDoc(doc(db, "folders", editFolderId), {
-        name, parentId: newParent,
+        name, parentId: newParent, prefix,
         ...(newParent !== (f.parentId || null) ? { order: nextOrder(newParent) } : {}),
         meta,
       });
@@ -2423,7 +2493,7 @@ $("feSave").addEventListener("click", async () => {
       await syncPathsUnder(editFolderId);
     } else {
       const ref = await addDoc(collection(db, "folders"), {
-        name, parentId: newParent, order: nextOrder(newParent), meta,
+        name, parentId: newParent, prefix, order: nextOrder(newParent), meta,
       });
       if (newParent) expanded.add(newParent);
       expanded.add(ref.id);
