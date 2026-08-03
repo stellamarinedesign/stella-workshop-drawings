@@ -43,11 +43,12 @@ roll out to idle devices automatically).
   codes like `ST0071D` and series numbers like `SL-Galaxy-2003` are both
   understood). The original filename is kept for downloads, the page count is
   probed, and the preview cache pre-warmed.
-- **＋ Batch** adds many drawings at once: paste share links one per line,
-  filenames are read automatically into an editable preview (duplicates
+- **⇄ Batch add** (top-right of the drawing form) switches to batch mode,
+  keeping the folder you opened the form from: paste share links one per
+  line, filenames are read automatically into an editable preview (duplicates
   against the library and within the batch are flagged), then one folder,
   category and revision apply to the lot and a single Save writes them all
-  with per-row results.
+  with per-row results. ⇄ switches back, folder intact.
 - **Part info** (Material code / Material description lead the display) shows
   on tiles, in the viewer header, and is searchable.
 - **Folders**: drag-and-drop or edit-form moves, reorder arrows, per-folder

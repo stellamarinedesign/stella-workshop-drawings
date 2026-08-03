@@ -531,7 +531,6 @@
     <span id="previewNote">Floor view — editing off</span>
     <span id="editTools">
       <button class="mini" id="addDrawingBtn">＋ Drawing</button>
-      <button class="mini" id="addBatchBtn">＋ Batch</button>
       <button class="mini" id="addFolderBtn">＋ Folder</button>
       <button class="mini" id="expandAllBtn">Expand all</button>
       <button class="mini" id="collapseAllBtn">Collapse all</button>
@@ -588,7 +587,10 @@
 <!-- ============ DRAWING FORM ============ -->
 <div class="overlay" id="drawingOverlay">
   <div class="box">
-    <h3 class="brand-head" id="dwgFormTitle">Add drawing</h3>
+    <div style="display:flex; align-items:baseline; gap:10px;">
+      <h3 class="brand-head" id="dwgFormTitle">Add drawing</h3>
+      <button class="mini" id="dwgToBatchBtn" style="margin-left:auto;">⇄ Batch add</button>
+    </div>
     <div class="o-field">
       <label for="fLink">OneDrive share link</label>
       <input type="text" id="fLink" placeholder="Paste the 'Anyone with the link' URL" autocomplete="off">
@@ -730,7 +732,10 @@
 <!-- ============ BATCH ADD ============ -->
 <div class="overlay" id="batchOverlay">
   <div class="box" style="max-width:780px;">
-    <h3 class="brand-head">Batch add drawings</h3>
+    <div style="display:flex; align-items:baseline; gap:10px;">
+      <h3 class="brand-head">Batch add drawings</h3>
+      <button class="mini" id="batchToSingleBtn" style="margin-left:auto;">⇄ Single add</button>
+    </div>
     <div class="o-field" id="batchStep1">
       <label for="batchLinks">Share links — one per line</label>
       <textarea id="batchLinks" rows="6" placeholder="Paste OneDrive 'Anyone with the link' URLs, one per line"
@@ -801,7 +806,7 @@ const ENGINEERING_EMAILS = ["design@stellamarine.com.au", "design2@stellamarine.
    drawings open in OneDrive instead. */
 const PROXY_BASE = "https://stella-drawings-proxy.design-fc7.workers.dev";
 
-const APP_VERSION = "3.12";
+const APP_VERSION = "3.13";
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut }
@@ -2111,6 +2116,7 @@ function openDrawingForm(d, presetFolderId) {
   $("dwgMsg").textContent = ""; $("dwgMsg").className = "o-msg";
   $("revWarn").classList.remove("show");
   pendingSave = null;
+  $("dwgToBatchBtn").style.display = d ? "none" : "";   // mode switch is for adding only
   $("dwgHideBtn").style.display = d ? "" : "none";
   $("dwgHideBtn").textContent = d && d.hidden ? "Unhide (show on floor)" : "Hide from floor";
   $("dwgDeleteBtn").style.display = d ? "" : "none";
@@ -2853,9 +2859,9 @@ let batchFolderId = null;
 let batchBusy = false;
 let batchCtrl = null;
 
-function openBatch() {
+function openBatch(presetFolderId) {
   batchRows = [];
-  batchFolderId = null;
+  batchFolderId = presetFolderId || null;
   batchBusy = false;
   $("batchLinks").value = "";
   $("batchRev").value = "A";
@@ -2877,7 +2883,24 @@ function openBatch() {
   updateBatchFolderBtn();
   $("batchOverlay").classList.add("show");
 }
-$("addBatchBtn").addEventListener("click", openBatch);
+/* batch lives INSIDE the drawing form: ＋ Dwg on a folder → ⇄ Batch add
+   carries that folder (and any category/revision already chosen) across */
+$("dwgToBatchBtn").addEventListener("click", () => {
+  const folder = formFolderId;
+  const cat = $("fCategory").value;
+  const rev = $("fRev").value.trim().toUpperCase();
+  $("drawingOverlay").classList.remove("show");
+  openBatch(folder);
+  if (cat && cat !== "__new__") $("batchCategory").value = cat;
+  if (rev) $("batchRev").value = rev;
+});
+$("batchToSingleBtn").addEventListener("click", () => {
+  if (batchBusy) return;
+  if (batchCtrl) batchCtrl.abort();
+  const folder = batchFolderId;
+  $("batchOverlay").classList.remove("show");
+  openDrawingForm(null, folder);
+});
 $("batchCancelBtn").addEventListener("click", () => {
   if (batchCtrl) batchCtrl.abort();
   $("batchOverlay").classList.remove("show");
