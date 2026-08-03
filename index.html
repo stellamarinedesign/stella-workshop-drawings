@@ -825,7 +825,7 @@ const ENGINEERING_EMAILS = ["design@stellamarine.com.au", "design2@stellamarine.
    drawings open in OneDrive instead. */
 const PROXY_BASE = "https://stella-drawings-proxy.design-fc7.workers.dev";
 
-const APP_VERSION = "3.14";
+const APP_VERSION = "3.15";
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut }
@@ -1278,9 +1278,11 @@ function folderRow(f, depth, count) {
   const meta = f.meta || {};
   const metaText = metaEntries(meta).map(([k,v]) => `${k}: ${v}`).join(" · ");
   // combined view/print works on the folder's OWN drawings, never subfolders —
-  // no button at all when there are none (also prevents an accidental
+  // and respects the active category pill, so it grabs exactly what's showing.
+  // No button when there's nothing (also prevents an accidental
   // print-everything from a parent that only holds subfolders)
-  const ownActive = (drawingsIn.get(f.id) || []).filter(d => !d.hidden).length;
+  const ownActive = (drawingsIn.get(f.id) || [])
+    .filter(d => !d.hidden && (!activeCategory || d.categoryId === activeCategory)).length;
   const effHidden = hiddenFolderSet.has(f.id);      // own flag OR inherited from an ancestor
   const row = document.createElement("div");
   row.className = "f-row" + (effHidden ? " is-hidden" : "");
@@ -1339,7 +1341,9 @@ function folderRow(f, depth, count) {
 function drawingRow(d, depth, showPath) {
   const row = document.createElement("div");
   row.className = "d-row";
-  row.style.marginLeft = (depth * 22 + 40) + "px";
+  // same indent as a sibling subfolder band — the extra 40px used to push
+  // drawings past their own folder's subfolders, which read as nesting
+  row.style.marginLeft = (depth * 22) + "px";
   const flagged = flaggedIds.has(d.id);
   row.innerHTML = `
     <div class="d-main" ${isEng ? 'draggable="true"' : ""}>
@@ -1855,7 +1859,10 @@ function combinedFilename(f) {
 }
 
 async function openCombinedViewer(f) {
-  const list = (drawingsIn.get(f.id) || []).filter(d => !d.hidden);
+  // same filter as the ⎙ All button count: the folder's own non-hidden
+  // drawings, narrowed to the active category when one is selected
+  const list = (drawingsIn.get(f.id) || [])
+    .filter(d => !d.hidden && (!activeCategory || d.categoryId === activeCategory));
   if (!list.length) return;
   viewerDrawing = null;
   viewerBytes = null;
